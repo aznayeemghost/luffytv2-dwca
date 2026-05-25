@@ -49,6 +49,8 @@ interface LiveWatchProps {
   matchPopular: boolean;
   matchSources: string;
   matchDate: number;
+  matchSportsrcCategory?: string;
+  matchSportsrcId?: string;
 }
 
 const sportIcons: Record<string, string> = {
@@ -195,7 +197,9 @@ export default function LiveWatchPage(props: LiveWatchProps) {
         awayBadge: props.matchAwayBadge,
         sources,
         isLive: true,
-      });
+        sportsrcCategory: props.matchSportsrcCategory || props.matchSport,
+        sportsrcId: props.matchSportsrcId || props.matchId,
+      } as any);
       return;
     }
 
@@ -235,7 +239,9 @@ export default function LiveWatchPage(props: LiveWatchProps) {
       setLoadingStreams(true);
       try {
         const sourcesParam = JSON.stringify(matchData.sources || []);
-        const res = await fetch(`/api/live/embed?matchId=${encodeURIComponent(matchData.id)}&sources=${encodeURIComponent(sourcesParam)}`);
+        const cat = (matchData as any).sportsrcCategory || props.matchSportsrcCategory || matchData.sport || "";
+        const srcId = (matchData as any).sportsrcId || props.matchSportsrcId || matchData.id || "";
+        const res = await fetch(`/api/live/embed?matchId=${encodeURIComponent(matchData.id)}&sources=${encodeURIComponent(sourcesParam)}&sportsrcCategory=${encodeURIComponent(cat)}&sportsrcId=${encodeURIComponent(srcId)}`);
         if (res.ok) {
           const data = await res.json();
           if (data.streams?.length > 0) {

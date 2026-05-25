@@ -1,24 +1,35 @@
 import { NextResponse } from "next/server";
 
 // ============================================================
-// LIVE TV & SPORTS API — Multiple API sources
-// Primary: streamed.pk (best data, has stream sources)
-// Secondary: thesportsdb.com (match schedules, team logos)
+// LIVE TV & SPORTS API — SportSRC as PRIMARY (WORKING!)
+// Primary: SportSRC (matches + embed URLs that work in iframes!)
+// Secondary: ESPN Hidden API (scores + schedules)
+// Tertiary: streamed.pk (backup data)
 // ============================================================
 
+const SPORTSRC_BASE = "https://api.sportsrc.org";
+const ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports";
 const STREAMED_BASE = "https://streamed.pk";
-const SPORTSDB_BASE = "https://www.thesportsdb.com/api/v1/json/3";
 const TIMEOUT = 12000;
 
-interface TeamInfo {
-  name: string;
-  badge: string;
-}
+// SportSRC category mapping
+const SPORTSRC_CATEGORIES = [
+  "football", "basketball", "american-football", "hockey", "baseball",
+  "motor-sports", "fight", "tennis", "rugby", "golf", "billiards",
+  "afl", "darts", "cricket", "other",
+];
 
-interface MatchSource {
-  source: string;
-  id: string;
-}
+// ESPN sport endpoints
+const ESPN_SPORTS = [
+  { sport: "basketball", league: "nba", id: "basketball" },
+  { sport: "football", league: "nfl", id: "american-football" },
+  { sport: "soccer", league: "eng.1", id: "football" },
+  { sport: "soccer", league: "usa.1", id: "football" },
+  { sport: "soccer", league: "esp.1", id: "football" },
+  { sport: "hockey", league: "nhl", id: "hockey" },
+  { sport: "baseball", league: "mlb", id: "baseball" },
+  { sport: "tennis", league: "atp", id: "tennis" },
+];
 
 interface LiveMatch {
   id: string;
@@ -32,8 +43,11 @@ interface LiveMatch {
   awayTeam: string;
   homeBadge: string;
   awayBadge: string;
-  sources: MatchSource[];
-  apiSource: string; // Which API provided this match
+  sources: { source: string; id: string }[];
+  apiSource: string;
+  // SportSRC-specific: include category + match ID for direct stream fetching
+  sportsrcCategory?: string;
+  sportsrcId?: string;
 }
 
 interface SportCategory {
@@ -58,19 +72,98 @@ async function fetchWithTimeout(url: string): Promise<Response> {
   });
 }
 
-// ── SOURCE 1: streamed.pk ──
-async function fetchSports(): Promise<SportCategory[]> {
+// ── SOURCE 1: SportSRC (PRIMARY — has everything including working embed URLs) ──
+async function fetchSportSRCSports(): Promise<SportCategory[]> {
   try {
-    const res = await fetchWithTimeout(`${STREAMED_BASE}/api/sports`);
+    const res = await fetchWithTimeout(`${SPORTSRC_BASE}/?data=sports`);
     if (!res.ok) return [];
     const data = await res.json();
-    if (!Array.isArray(data)) return [];
-    return data.map((s: any) => ({ id: s.id || "", name: s.name || s.id || "" }));
+    if (!data.success || !Array.isArray(data.data)) return [];
+    return data.data.map((s: any) => ({ id: s.id || "", name: s.name || s.id || "" }));
   } catch {
     return [];
   }
 }
 
+async function fetchSportSRCMatches(category: string): Promise<LiveMatch[]> {
+  try {
+    const res = await fetchWithTimeout(`${SPORTSRC_BASE}/?data=matches&category=${encodeURIComponent(category)}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!data.success || !Array.isArray(data.data)) return [];
+
+    return data.data.map((m: any): LiveMatch => ({
+      id: m.id || String(Math.random()),
+      title: m.title || "Unknown Match",
+      sport: m.category || category,
+      sportName: m.category
+        ? m.category.charAt(0).toUpperCase() + m.category.slice(1).replace(/-/g, " ")
+        : category,
+      date: m.date || 0,
+      poster: m.poster || "",
+      popular: m.popular || false,
+      homeTeam: m.teams?.home?.name || "",
+      awayTeam: m.teams?.away?.name || "",
+      homeBadge: m.teams?.home?.badge || "",
+      awayBadge: m.teams?.away?.badge || "",
+      sources: [], // Fetched on-demand when user clicks "Watch"
+      apiSource: "sportsrc",
+      sportsrcCategory: m.category || category,
+      sportsrcId: m.id,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// ── SOURCE 2: ESPN Hidden API (schedules + scores, no streams) ──
+async function fetchESPNMatches(): Promise<LiveMatch[]> {
+  const matches: LiveMatch[] = [];
+
+  const results = await Promise.allSettled(
+    ESPN_SPORTS.map(async (espn) => {
+      try {
+        const res = await fetchWithTimeout(`${ESPN_BASE}/${espn.sport}/${espn.league}/scoreboard`);
+        if (!res.ok) return [];
+        const data = await res.json();
+        const events = data.events || [];
+
+        return events.map((e: any): LiveMatch => {
+          const competitions = e.competitions?.[0];
+          const homeTeam = competitions?.competitors?.find((c: any) => c.homeAway === "home");
+          const awayTeam = competitions?.competitors?.find((c: any) => c.homeAway === "away");
+
+          return {
+            id: `espn-${e.id}`,
+            title: e.name || "Unknown Match",
+            sport: espn.id,
+            sportName: espn.sport === "soccer" ? "Football" : espn.sport.charAt(0).toUpperCase() + espn.sport.slice(1),
+            date: e.date ? new Date(e.date).getTime() : 0,
+            poster: competitions?.odds?.[0]?.detail || "",
+            popular: false,
+            homeTeam: homeTeam?.team?.displayName || "",
+            awayTeam: awayTeam?.team?.displayName || "",
+            homeBadge: homeTeam?.team?.logo || "",
+            awayBadge: awayTeam?.team?.logo || "",
+            sources: [],
+            apiSource: "espn",
+          };
+        });
+      } catch {
+        return [];
+      }
+    })
+  );
+
+  for (const result of results) {
+    if (result.status === "fulfilled" && Array.isArray(result.value)) {
+      matches.push(...result.value);
+    }
+  }
+  return matches;
+}
+
+// ── SOURCE 3: streamed.pk (backup match data) ──
 async function fetchStreamedMatches(endpoint: string): Promise<LiveMatch[]> {
   try {
     const res = await fetchWithTimeout(`${STREAMED_BASE}${endpoint}`);
@@ -78,158 +171,76 @@ async function fetchStreamedMatches(endpoint: string): Promise<LiveMatch[]> {
     const data = await res.json();
     if (!Array.isArray(data)) return [];
 
-    return data.map((m: any): LiveMatch => {
-      const homeTeam = m.teams?.home?.name || "";
-      const awayTeam = m.teams?.away?.name || "";
-      const homeBadge = m.teams?.home?.badge
-        ? `${STREAMED_BASE}/api/images/badge/${m.teams.home.badge}.webp`
-        : "";
-      const awayBadge = m.teams?.away?.badge
-        ? `${STREAMED_BASE}/api/images/badge/${m.teams.away.badge}.webp`
-        : "";
-      const poster = m.poster
-        ? `${STREAMED_BASE}${m.poster}`
-        : "";
-
-      return {
-        id: m.id || String(Math.random()),
-        title: m.title || "Unknown Match",
-        sport: m.category || "",
-        sportName: m.category
-          ? m.category.charAt(0).toUpperCase() + m.category.slice(1).replace(/-/g, " ")
-          : "Other",
-        date: m.date || 0,
-        poster,
-        popular: m.popular || false,
-        homeTeam,
-        awayTeam,
-        homeBadge,
-        awayBadge,
-        sources: Array.isArray(m.sources)
-          ? m.sources.map((s: any) => ({ source: s.source || "", id: s.id || "" }))
-          : [],
-        apiSource: "streamed.pk",
-      };
-    });
+    return data.map((m: any): LiveMatch => ({
+      id: m.id || String(Math.random()),
+      title: m.title || "Unknown Match",
+      sport: m.category || "",
+      sportName: m.category
+        ? m.category.charAt(0).toUpperCase() + m.category.slice(1).replace(/-/g, " ")
+        : "Other",
+      date: m.date || 0,
+      poster: m.poster ? `${STREAMED_BASE}${m.poster}` : "",
+      popular: m.popular || false,
+      homeTeam: m.teams?.home?.name || "",
+      awayTeam: m.teams?.away?.name || "",
+      homeBadge: m.teams?.home?.badge ? `${STREAMED_BASE}/api/images/badge/${m.teams.home.badge}.webp` : "",
+      awayBadge: m.teams?.away?.badge ? `${STREAMED_BASE}/api/images/badge/${m.teams.away.badge}.webp` : "",
+      sources: Array.isArray(m.sources) ? m.sources.map((s: any) => ({ source: s.source || "", id: s.id || "" })) : [],
+      apiSource: "streamed.pk",
+    }));
   } catch {
     return [];
   }
 }
 
-// ── SOURCE 2: thesportsdb.com ──
-// Map thesportsdb sports to our sport categories
-const SPORTSDB_SPORT_MAP: Record<string, string> = {
-  "Soccer": "football",
-  "Basketball": "basketball",
-  "American Football": "american-football",
-  "Ice Hockey": "hockey",
-  "Baseball": "baseball",
-  "Tennis": "tennis",
-  "Fighting": "fight",
-  "Motorsport": "motor-sports",
-  "Rugby": "rugby",
-  "Golf": "golf",
-  "Cricket": "cricket",
-  "Billiards": "billiards",
-  "AFL": "afl",
-  "Darts": "darts",
-};
-
-async function fetchSportsDBMatches(): Promise<LiveMatch[]> {
-  try {
-    // Fetch today's events across major sports
-    const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-    const sportLeagues = [
-      { sport: "Soccer", leagueId: "4335" },  // Premier League
-      { sport: "Basketball", leagueId: "4387" }, // NBA
-      { sport: "American Football", leagueId: "4391" }, // NFL
-      { sport: "Ice Hockey", leagueId: "4380" }, // NHL
-      { sport: "Baseball", leagueId: "4424" },   // MLB
-      { sport: "Tennis", leagueId: "4464" },     // ATP
-    ];
-
-    const results = await Promise.allSettled(
-      sportLeagues.map(async (sl) => {
-        try {
-          const res = await fetchWithTimeout(
-            `${SPORTSDB_BASE}/eventsday.php?d=${today}&sp=${sl.leagueId}`
-          );
-          if (!res.ok) return [];
-          const data = await res.json();
-          const events = data.events || [];
-          return events.map((e: any): LiveMatch => ({
-            id: `tdb-${e.idEvent}`,
-            title: e.strEvent || "Unknown Match",
-            sport: SPORTSDB_SPORT_MAP[sl.sport] || "other",
-            sportName: sl.sport,
-            date: e.strTimestamp ? new Date(e.strTimestamp).getTime() : 0,
-            poster: e.strThumb || e.strBanner || "",
-            popular: false,
-            homeTeam: e.strHomeTeam || "",
-            awayTeam: e.strAwayTeam || "",
-            homeBadge: e.strHomeTeamBadge || "",
-            awayBadge: e.strAwayTeamBadge || "",
-            sources: [], // thesportsdb doesn't provide stream sources
-            apiSource: "thesportsdb",
-          }));
-        } catch {
-          return [];
-        }
-      })
-    );
-
-    const matches: LiveMatch[] = [];
-    for (const result of results) {
-      if (result.status === "fulfilled" && Array.isArray(result.value)) {
-        matches.push(...result.value);
-      }
-    }
-    return matches;
-  } catch {
-    return [];
-  }
-}
-
-// ── Merge matches from multiple sources (dedupe by id) ──
+// ── Merge matches from multiple sources ──
 function mergeMatches(lists: LiveMatch[][]): LiveMatch[] {
   const seen = new Set<string>();
   const merged: LiveMatch[] = [];
 
   for (const list of lists) {
     for (const m of list) {
-      if (seen.has(m.id)) {
-        // Merge data from different sources into existing match
-        const existing = merged.find(x => x.id === m.id);
+      // Create a dedup key based on team names or title similarity
+      const key = m.homeTeam && m.awayTeam
+        ? `${m.sport}:${m.homeTeam.toLowerCase()}:${m.awayTeam.toLowerCase()}`
+        : m.id;
+
+      if (seen.has(key)) {
+        const existing = merged.find(x => {
+          const xkey = x.homeTeam && x.awayTeam
+            ? `${x.sport}:${x.homeTeam.toLowerCase()}:${x.awayTeam.toLowerCase()}`
+            : x.id;
+          return xkey === key;
+        });
         if (existing) {
-          // Add any new sources (from streamed.pk)
-          for (const src of m.sources) {
-            if (!existing.sources.some(s => s.source === src.source && s.id === src.id)) {
-              existing.sources.push(src);
-            }
-          }
-          // Fill missing data (from thesportsdb)
-          if (m.homeTeam && !existing.homeTeam) existing.homeTeam = m.homeTeam;
-          if (m.awayTeam && !existing.awayTeam) existing.awayTeam = m.awayTeam;
+          // Merge: prefer SportSRC data (has embed URLs), fill missing from other sources
           if (m.homeBadge && !existing.homeBadge) existing.homeBadge = m.homeBadge;
           if (m.awayBadge && !existing.awayBadge) existing.awayBadge = m.awayBadge;
           if (m.poster && !existing.poster) existing.poster = m.poster;
-          // Mark popular if any source says so
           if (m.popular) existing.popular = true;
+          // Add SportSRC reference if available
+          if (m.sportsrcId && !existing.sportsrcId) {
+            existing.sportsrcId = m.sportsrcId;
+            existing.sportsrcCategory = m.sportsrcCategory;
+          }
+          // Add streamed.pk sources
+          if (m.sources?.length > 0 && existing.sources.length === 0) {
+            existing.sources = m.sources;
+          }
           // Use earliest date
           if (m.date && (!existing.date || m.date < existing.date)) existing.date = m.date;
         }
         continue;
       }
-      seen.add(m.id);
+      seen.add(key);
       merged.push(m);
     }
   }
 
-  // Sort: popular first, then by date descending
   return merged.sort((a, b) => {
     if (a.popular && !b.popular) return -1;
     if (!a.popular && b.popular) return 1;
-    return b.date - a.date;
+    return a.date - b.date;
   });
 }
 
@@ -239,32 +250,43 @@ export async function GET(req: Request) {
   const filter = url.searchParams.get("filter") || "";
 
   try {
-    // Fetch from ALL sources in parallel
-    const [sportsResult, liveMatches, todayMatches, sportMatches, sportsDBMatches] = await Promise.allSettled([
-      fetchSports(),
+    // Fetch from SportSRC FIRST (primary — has working embed URLs)
+    const categoriesToFetch = sport ? [sport] : SPORTSRC_CATEGORIES;
+
+    // Fetch SportSRC matches in parallel (batched - max 5 at a time to avoid rate limits)
+    const sportsrcBatches: Promise<LiveMatch[]>[] = [];
+    for (let i = 0; i < categoriesToFetch.length; i += 5) {
+      const batch = categoriesToFetch.slice(i, i + 5);
+      sportsrcBatches.push(
+        Promise.all(batch.map(cat => fetchSportSRCMatches(cat))).then(results => results.flat())
+      );
+    }
+    const sportsrcResults = await Promise.all(sportsrcBatches);
+    const sportsrcMatches = sportsrcResults.flat();
+
+    // Also fetch SportSRC sports list
+    const sportsPromise = fetchSportSRCSports();
+
+    // Fetch ESPN + streamed.pk in parallel (secondary sources)
+    const [espnResult, sportsResult, streamedLive, streamedToday] = await Promise.allSettled([
+      fetchESPNMatches(),
+      sportsPromise,
       fetchStreamedMatches("/api/matches/live"),
       fetchStreamedMatches("/api/matches/all-today"),
-      sport ? fetchStreamedMatches(`/api/matches/${sport}`) : Promise.resolve([]),
-      fetchSportsDBMatches(),
     ]);
 
+    const espnMatches = espnResult.status === "fulfilled" ? espnResult.value : [];
     const sports: SportCategory[] = sportsResult.status === "fulfilled" ? sportsResult.value : [];
+    const streamedLiveMatches = streamedLive.status === "fulfilled" ? streamedLive.value : [];
+    const streamedTodayMatches = streamedToday.status === "fulfilled" ? streamedToday.value : [];
 
-    // Collect all match lists
-    const allMatchLists: LiveMatch[][] = [];
-    if (liveMatches.status === "fulfilled" && liveMatches.value.length > 0) {
-      allMatchLists.push(liveMatches.value);
-    }
-    if (todayMatches.status === "fulfilled" && todayMatches.value.length > 0) {
-      allMatchLists.push(todayMatches.value);
-    }
-    if (sportMatches.status === "fulfilled" && sportMatches.value.length > 0) {
-      allMatchLists.push(sportMatches.value);
-    }
-    // Add thesportsdb matches (supplementary data, no streams)
-    if (sportsDBMatches.status === "fulfilled" && sportsDBMatches.value.length > 0) {
-      allMatchLists.push(sportsDBMatches.value);
-    }
+    // Merge all sources
+    const allMatchLists: LiveMatch[][] = [
+      sportsrcMatches,  // PRIMARY — has sportsrcId for fetching embeds
+      espnMatches,
+      streamedLiveMatches,
+      streamedTodayMatches,
+    ];
 
     let matches = mergeMatches(allMatchLists);
 
@@ -273,29 +295,28 @@ export async function GET(req: Request) {
       matches = matches.filter(m => m.sport === sport);
     }
 
-    // Filter by live/popular
+    // Filter for live matches
     if (filter === "live") {
-      const liveIds = liveMatches.status === "fulfilled"
-        ? new Set(liveMatches.value.map(m => m.id))
-        : new Set<string>();
-      matches = matches.filter(m => liveIds.has(m.id));
-    }
-    if (filter === "popular") {
-      matches = matches.filter(m => m.popular);
+      const now = Date.now();
+      matches = matches.filter(m => {
+        // A match is "live" if it started within the last 3 hours and hasn't ended
+        if (!m.date) return false;
+        return m.date <= now && m.date > now - 10800000;
+      });
     }
 
-    // Only show matches that have streams OR are from thesportsdb (informational)
-    // Actually, show all matches - some thesportsdb matches might not have streams
-    // but they show upcoming schedules which is useful
+    // Count by source
+    const sourceCounts = {
+      sportsrc: sportsrcMatches.length,
+      espn: espnMatches.length,
+      streamed: (streamedLiveMatches.length + streamedTodayMatches.length),
+    };
 
     return NextResponse.json({
       matches,
       sports,
       total: matches.length,
-      sources: {
-        streamed: liveMatches.status === "fulfilled" ? liveMatches.value.length : 0,
-        thesportsdb: sportsDBMatches.status === "fulfilled" ? sportsDBMatches.value.length : 0,
-      },
+      sources: sourceCounts,
     });
   } catch (error: any) {
     return NextResponse.json(

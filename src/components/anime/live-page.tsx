@@ -50,6 +50,8 @@ interface LiveMatch {
   sources: MatchSource[];
   isLive: boolean;
   apiSource?: string;
+  sportsrcCategory?: string;
+  sportsrcId?: string;
 }
 
 interface SportCategory {
@@ -472,6 +474,8 @@ export default function LivePage() {
       matchPopular: match.popular,
       matchSources: JSON.stringify(match.sources),
       matchDate: match.date,
+      matchSportsrcCategory: match.sportsrcCategory || "",
+      matchSportsrcId: match.sportsrcId || "",
     } as any);
   };
 
