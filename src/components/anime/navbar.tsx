@@ -68,6 +68,7 @@ export default function Navbar() {
   // Default nav links (shown on home, features, contact, watchnow, etc.)
   const defaultNavLinks = [
     { id: "home", label: "Home" },
+    { id: "guide", label: "Guide" },
     { id: "features", label: "Features" },
     { id: "contact", label: "Contact" },
   ];
@@ -82,6 +83,7 @@ export default function Navbar() {
     }
     // Default nav active state
     if (id === "home" && route.page === "home") return true;
+    if (id === "guide" && route.page === "guide") return true;
     if (id === "features" && route.page === "features") return true;
     if (id === "contact" && route.page === "contact") return true;
     return false;
@@ -95,6 +97,7 @@ export default function Navbar() {
     } else {
       // Default navigation
       if (id === "home") navigate({ page: "home" });
+      else if (id === "guide") navigate({ page: "guide" });
       else if (id === "features") {
         if (route.page === "home") {
           const el = document.getElementById("features-section");
@@ -117,6 +120,13 @@ export default function Navbar() {
         <polyline points="9 22 9 12 15 12 15 22" />
       </svg>
     )},
+    { id: "guide", label: "Guide", icon: () => (
+      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" />
+        <line x1="12" y1="17" x2="12.01" y2="17" />
+      </svg>
+    )},
     { id: "watchnow", label: "Watch", icon: () => (
       <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" stroke="none">
         <polygon points="5 3 19 12 5 21 5 3" />
@@ -128,28 +138,22 @@ export default function Navbar() {
         <polyline points="17 2 12 7 7 2" />
       </svg>
     )},
-    { id: "contact", label: "Contact", icon: () => (
-      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-        <polyline points="22,6 12,13 2,6" />
-      </svg>
-    )},
   ];
 
   const isBottomActive = (id: string) => {
     if (id === "home" && route.page === "home") return true;
+    if (id === "guide" && route.page === "guide") return true;
     if (id === "watchnow" && route.page === "watchnow") return true;
     if (id === "watchnow" && ["dub", "movies", "tv", "manga", "anime", "watch", "movie-detail", "tv-detail", "movie-watch", "tv-watch", "manga-detail", "manga-read"].includes(route.page)) return true;
     if (id === "live" && ["live", "live-watch"].includes(route.page)) return true;
-    if (id === "contact" && route.page === "contact") return true;
     return false;
   };
 
   const handleBottomNav = (id: string) => {
     if (id === "home") navigate({ page: "home" });
+    else if (id === "guide") navigate({ page: "guide" });
     else if (id === "watchnow") navigate({ page: "watchnow" });
     else if (id === "live") navigate({ page: "live" });
-    else if (id === "contact") navigate({ page: "contact" });
   };
 
   return (
