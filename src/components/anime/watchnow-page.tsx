@@ -20,6 +20,20 @@ const categories = [
     page: "dub" as const,
   },
   {
+    id: "live",
+    title: "Live TV",
+    desc: "Watch live sports & TV channels in HD",
+    icon: (
+      <svg className="w-7 h-7" viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        <rect x="4" y="8" width="40" height="28" rx="3" />
+        <polyline points="4 14 24 24 44 14" />
+        <circle cx="40" cy="12" r="3" fill="#ef4444" stroke="none" />
+      </svg>
+    ),
+    color: "#ef4444",
+    page: "live" as const,
+  },
+  {
     id: "movies",
     title: "Movies",
     desc: "Stream blockbuster films and indie gems",

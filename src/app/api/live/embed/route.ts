@@ -372,6 +372,70 @@ async function resolveStreamedPK(sources: { source: string; id: string }[]): Pro
   return results;
 }
 
+// ── PROVIDER 6: sportsembed.su (direct embed M3U8 extraction) ──
+async function resolveSportsembedSu(category: string, matchId: string): Promise<StreamResult[]> {
+  const results: StreamResult[] = [];
+  try {
+    const embedUrl = `https://sportsembed.su/embed/${category}/${matchId}`;
+    const html = await GEThtml(embedUrl, { Referer: "https://sportsembed.su/" });
+    const m3u8Matches = html.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/g);
+    if (m3u8Matches) {
+      const seen = new Set<string>();
+      for (const url of m3u8Matches) {
+        if (seen.has(url)) continue;
+        seen.add(url);
+        results.push({
+          id: `se-${category}-${matchId}-${results.length + 1}`,
+          streamNo: results.length + 1,
+          language: "English",
+          hd: results.length === 0,
+          m3u8Url: url,
+          quality: results.length === 0 ? "720p" : "480p",
+          source: "sportsembed",
+          viewers: 0,
+          provider: "sportsembed",
+          corsEnabled: false,
+          referer: "https://sportsembed.su/",
+          embedUrl,
+        });
+      }
+    }
+  } catch {}
+  return results;
+}
+
+// ── PROVIDER 7: embedsports.top (direct embed M3U8 extraction) ──
+async function resolveEmbedsportsTop(category: string, matchId: string): Promise<StreamResult[]> {
+  const results: StreamResult[] = [];
+  try {
+    const embedUrl = `https://embedsports.top/embed/${category}/${matchId}`;
+    const html = await GEThtml(embedUrl, { Referer: "https://embedsports.top/" });
+    const m3u8Matches = html.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/g);
+    if (m3u8Matches) {
+      const seen = new Set<string>();
+      for (const url of m3u8Matches) {
+        if (seen.has(url)) continue;
+        seen.add(url);
+        results.push({
+          id: `es-${category}-${matchId}-${results.length + 1}`,
+          streamNo: results.length + 1,
+          language: "English",
+          hd: results.length === 0,
+          m3u8Url: url,
+          quality: results.length === 0 ? "720p" : "480p",
+          source: "embedsports",
+          viewers: 0,
+          provider: "embedsports",
+          corsEnabled: false,
+          referer: "https://embedsports.top/",
+          embedUrl,
+        });
+      }
+    }
+  } catch {}
+  return results;
+}
+
 // ── MAIN HANDLER ──
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -422,6 +486,18 @@ export async function GET(req: Request) {
     resolvePromises.push(resolveStreamedPK(parsedSources));
   }
 
+  // Try sportsembed.su if provider matches or we have category + id
+  const sportsrcCategory = url.searchParams.get("sportsrcCategory") || streamCategory || "";
+  const sportsrcId = url.searchParams.get("sportsrcId") || matchId || "";
+  if (provider === "sportsembed" || (sportsrcCategory && sportsrcId)) {
+    resolvePromises.push(resolveSportsembedSu(sportsrcCategory, sportsrcId));
+  }
+
+  // Try embedsports.top if provider matches or as fallback
+  if (provider === "embedsports" || (sportsrcCategory && sportsrcId)) {
+    resolvePromises.push(resolveEmbedsportsTop(sportsrcCategory, sportsrcId));
+  }
+
   // If no specific provider data, try based on provider field
   if (resolvePromises.length === 0 && matchId) {
     // Fallback: try all providers with the match ID
@@ -429,6 +505,9 @@ export async function GET(req: Request) {
     if (parsedSources.length === 0) {
       resolvePromises.push(resolveStreamedPK([{ source: "admin", id: matchId }]));
     }
+    // Also try sportsembed.su and embedsports.top as fallbacks
+    resolvePromises.push(resolveSportsembedSu("sports", matchId));
+    resolvePromises.push(resolveEmbedsportsTop("sports", matchId));
   }
 
   const allResults = await Promise.all(resolvePromises);

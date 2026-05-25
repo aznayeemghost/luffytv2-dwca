@@ -4,7 +4,8 @@ import { NextResponse } from "next/server";
 // LIVE TV & SPORTS — Multi-Source Aggregator
 // Sources: streamfree.app (M3U8), cdnlivetv.tv (762 channels),
 //          dami-tv.pro (match data), watchfooty.st (match data),
-//          streamed.pk (backup), ESPN (schedules)
+//          streamed.pk (backup), ESPN (schedules),
+//          sportsembed.su (embeds), embedsports.top (embeds)
 // ============================================================
 
 const TIMEOUT = 10000;
@@ -330,6 +331,71 @@ async function fetchESPNMatches(): Promise<LiveMatch[]> {
   return matches;
 }
 
+// ── SOURCE 7: sportsembed.su (embed URLs for live sports) ──
+async function fetchSportsembedSu(): Promise<LiveMatch[]> {
+  try {
+    const res = await httpGet("https://sportsembed.su/api/events/live", { Referer: "https://sportsembed.su/" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+
+    return data.map((ev: any): LiveMatch => {
+      const sport = mapCategoryToSport(ev.sport || ev.category || "other");
+      return {
+        id: `se-${ev.id || Math.random()}`,
+        title: ev.title || ev.name || "Live Event",
+        sport,
+        sportName: SPORT_NAMES[sport] || capitalize(ev.sport || "Sports"),
+        date: ev.date ? new Date(ev.date).getTime() : (ev.start_time ? ev.start_time * 1000 : 0),
+        poster: ev.poster || ev.image || "",
+        popular: ev.featured || false,
+        homeTeam: ev.home_team || ev.teams?.home?.name || extractTeam(ev.title || "", 0),
+        awayTeam: ev.away_team || ev.teams?.away?.name || extractTeam(ev.title || "", 1),
+        homeBadge: ev.home_logo || ev.teams?.home?.logo || "",
+        awayBadge: ev.away_logo || ev.teams?.away?.logo || "",
+        isLive: true,
+        apiSource: "sportsembed",
+        sources: [],
+        sportsrcCategory: ev.category || ev.sport || "",
+        sportsrcId: ev.id || "",
+      };
+    });
+  } catch { return []; }
+}
+
+// ── SOURCE 8: embedsports.top (stream embeds) ──
+async function fetchEmbedsportsTop(): Promise<LiveMatch[]> {
+  try {
+    const res = await httpGet("https://embedsports.top/api/events", { Referer: "https://embedsports.top/" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!Array.isArray(data) && !data?.events) return [];
+    const events = Array.isArray(data) ? data : (data.events || []);
+
+    return events.map((ev: any): LiveMatch => {
+      const sport = mapCategoryToSport(ev.sport || ev.category || "other");
+      return {
+        id: `es-${ev.id || Math.random()}`,
+        title: ev.title || ev.name || "Sports Event",
+        sport,
+        sportName: SPORT_NAMES[sport] || capitalize(ev.sport || "Sports"),
+        date: ev.date ? new Date(ev.date).getTime() : (ev.start ? ev.start * 1000 : 0),
+        poster: ev.poster || ev.image || "",
+        popular: ev.featured || false,
+        homeTeam: ev.home_team || ev.teams?.home?.name || extractTeam(ev.title || "", 0),
+        awayTeam: ev.away_team || ev.teams?.away?.name || extractTeam(ev.title || "", 1),
+        homeBadge: ev.home_logo || ev.teams?.home?.logo || "",
+        awayBadge: ev.away_logo || ev.teams?.away?.logo || "",
+        isLive: ev.live || ev.status === "live" || false,
+        apiSource: "embedsports",
+        sources: [],
+        sportsrcCategory: ev.category || ev.sport || "",
+        sportsrcId: ev.id || "",
+      };
+    });
+  } catch { return []; }
+}
+
 // ── Merge & Deduplicate ──
 function mergeMatches(lists: LiveMatch[][]): LiveMatch[] {
   const seen = new Map<string, LiveMatch>();
@@ -421,7 +487,7 @@ export async function GET(req: Request) {
 
   try {
     // Fetch from ALL sources in parallel
-    const [streamfree, cdnChannels, cdnSports, damitv, wfLive, wfAll, streamedLive, streamedToday, espn] = await Promise.allSettled([
+    const [streamfree, cdnChannels, cdnSports, damitv, wfLive, wfAll, streamedLive, streamedToday, espn, sportsembed, embedsports] = await Promise.allSettled([
       fetchStreamfreeStreams(),
       mode === "tv" ? fetchCDNLivetvChannels() : Promise.resolve([]),
       fetchCDNLivetvSports(),
@@ -431,6 +497,8 @@ export async function GET(req: Request) {
       fetchStreamedPK("/api/matches/live"),
       fetchStreamedPK("/api/matches/all-today"),
       fetchESPNMatches(),
+      fetchSportsembedSu(),
+      fetchEmbedsportsTop(),
     ]);
 
     const allLists: LiveMatch[][] = [
@@ -443,6 +511,8 @@ export async function GET(req: Request) {
       streamedLive.status === "fulfilled" ? streamedLive.value : [],
       streamedToday.status === "fulfilled" ? streamedToday.value : [],
       espn.status === "fulfilled" ? espn.value : [],
+      sportsembed.status === "fulfilled" ? sportsembed.value : [],
+      embedsports.status === "fulfilled" ? embedsports.value : [],
     ];
 
     let matches = mergeMatches(allLists);

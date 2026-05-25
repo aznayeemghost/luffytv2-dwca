@@ -717,6 +717,8 @@ export default function LivePage() {
             <span className="text-[9px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400/50 border border-cyan-500/10">watchfooty</span>
             <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400/50 border border-amber-500/10">streamed.pk</span>
             <span className="text-[9px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400/50 border border-red-500/10">espn</span>
+            <span className="text-[9px] px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-400/50 border border-orange-500/10">sportsembed</span>
+            <span className="text-[9px] px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-400/50 border border-teal-500/10">embedsports</span>
             <span className="text-[10px] text-white/15">{matches.length} matches</span>
           </div>
           <button onClick={() => navigate({ page: "watchnow" })} className="text-[10px] text-[#7c6cf0]/50 hover:text-[#7c6cf0] transition-colors">

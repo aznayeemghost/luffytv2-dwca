@@ -20,6 +20,8 @@ const ALLOWED_HOSTS = [
   "edge.cdnlivetv.ru",
   "cdnlivetv.ru",
   "dami-tv.pro",
+  "sportsembed.su",
+  "embedsports.top",
 ];
 
 export async function GET(
@@ -74,6 +76,10 @@ export async function GET(
       } else if (targetHost.includes("dami-tv")) {
         refererValue = "https://dami-tv.pro/";
       } else if (targetHost.includes("strmd")) {
+        refererValue = "https://embedsports.top/";
+      } else if (targetHost.includes("sportsembed")) {
+        refererValue = "https://sportsembed.su/";
+      } else if (targetHost.includes("embedsports")) {
         refererValue = "https://embedsports.top/";
       }
     }
