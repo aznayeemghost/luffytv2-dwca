@@ -1,0 +1,63 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Bookmark {
+  id        String   @id @default(cuid())
+  animeId   String
+  animeName String
+  thumbnail String?
+  score     Float?
+  type      String?
+  status    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([animeId])
+}
+
+model WatchHistory {
+  id           String   @id @default(cuid())
+  animeId      String
+  animeName    String
+  thumbnail    String?
+  episodeNum   Float
+  episodeTitle String?
+  progress     Float    @default(0)
+  duration     Float    @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([animeId, episodeNum])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  animeId   String
+  episode   Float?
+  username  String
+  content   String
+  parentId  String?
+  rating    Int?
+  likes     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userLikes CommentLike[]
+}
+
+model CommentLike {
+  id        String   @id @default(cuid())
+  commentId String
+  username  String
+  createdAt DateTime @default(now())
+
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, username])
+}
