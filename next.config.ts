@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
-
+  turbopack: {},
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "**" },

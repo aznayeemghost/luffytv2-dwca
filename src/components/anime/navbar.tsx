@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useAppStore, getSectionNavLinks } from "./store";
 import type { SectionSubPage } from "./store";
 
@@ -51,13 +51,6 @@ export default function Navbar() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [scrolled, setScrolled] = useState(false);
-
-  useEffect(() => {
-    const handleScroll = () => setScrolled(window.scrollY > 50);
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,7 +68,6 @@ export default function Navbar() {
   // Default nav links (shown on home, features, contact, watchnow, etc.)
   const defaultNavLinks = [
     { id: "home", label: "Home" },
-    { id: "guide", label: "Guide" },
     { id: "features", label: "Features" },
     { id: "contact", label: "Contact" },
   ];
@@ -90,7 +82,6 @@ export default function Navbar() {
     }
     // Default nav active state
     if (id === "home" && route.page === "home") return true;
-    if (id === "guide" && route.page === "guide") return true;
     if (id === "features" && route.page === "features") return true;
     if (id === "contact" && route.page === "contact") return true;
     return false;
@@ -104,7 +95,6 @@ export default function Navbar() {
     } else {
       // Default navigation
       if (id === "home") navigate({ page: "home" });
-      else if (id === "guide") navigate({ page: "guide" });
       else if (id === "features") {
         if (route.page === "home") {
           const el = document.getElementById("features-section");
@@ -127,21 +117,15 @@ export default function Navbar() {
         <polyline points="9 22 9 12 15 12 15 22" />
       </svg>
     )},
-    { id: "guide", label: "Guide", icon: () => (
-      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-      </svg>
-    )},
     { id: "watchnow", label: "Watch", icon: () => (
       <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" stroke="none">
         <polygon points="5 3 19 12 5 21 5 3" />
       </svg>
     )},
-    { id: "features", label: "Features", icon: () => (
+    { id: "live", label: "Live TV", icon: () => (
       <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.18V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0-1.18-2.82H3a2 2 0 0 1 0-4h.09" />
+        <rect x="2" y="7" width="20" height="15" rx="2" ry="2" />
+        <polyline points="17 2 12 7 7 2" />
       </svg>
     )},
     { id: "contact", label: "Contact", icon: () => (
@@ -154,24 +138,17 @@ export default function Navbar() {
 
   const isBottomActive = (id: string) => {
     if (id === "home" && route.page === "home") return true;
-    if (id === "guide" && route.page === "guide") return true;
     if (id === "watchnow" && route.page === "watchnow") return true;
     if (id === "watchnow" && ["dub", "movies", "tv", "manga", "anime", "watch", "movie-detail", "tv-detail", "movie-watch", "tv-watch", "manga-detail", "manga-read"].includes(route.page)) return true;
-    if (id === "features" && route.page === "features") return true;
+    if (id === "live" && ["live", "live-watch"].includes(route.page)) return true;
     if (id === "contact" && route.page === "contact") return true;
     return false;
   };
 
   const handleBottomNav = (id: string) => {
     if (id === "home") navigate({ page: "home" });
-    else if (id === "guide") navigate({ page: "guide" });
     else if (id === "watchnow") navigate({ page: "watchnow" });
-    else if (id === "features") {
-      if (route.page === "home") {
-        const el = document.getElementById("features-section");
-        if (el) el.scrollIntoView({ behavior: "smooth" });
-      } else navigate({ page: "features" });
-    }
+    else if (id === "live") navigate({ page: "live" });
     else if (id === "contact") navigate({ page: "contact" });
   };
 
@@ -181,18 +158,14 @@ export default function Navbar() {
           FLOATING PILL NAVBAR — LunarAnime style
           Transparent glassmorphism, always visible
           ═══════════════════════════════════════════ */}
-      <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center" style={{ willChange: 'transform' }}>
+      <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center">
         {/* Mascot floating above the pill */}
         <div className="lunar-mascot-float -mb-3 drop-shadow-[0_4px_12px_rgba(124,108,240,0.3)]">
           <NavMascot className="w-12 h-10 hidden sm:block" />
         </div>
 
         {/* Pill navbar */}
-        <nav className={`lunar-nav-pill px-3 sm:px-5 py-2.5 flex items-center gap-2 sm:gap-4 transition-all duration-300 ${
-          scrolled
-            ? "backdrop-blur-xl bg-black/70 shadow-lg shadow-black/30 border border-white/10"
-            : "shadow-[0_8px_32px_rgba(0,0,0,0.5)]"
-        }`}>
+        <nav className="lunar-nav-pill px-3 sm:px-5 py-2.5 flex items-center gap-2 sm:gap-4 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
           {/* Logo */}
           <button
             onClick={() => navigate({ page: "home" })}
@@ -216,10 +189,10 @@ export default function Navbar() {
               <button
                 key={link.id}
                 onClick={() => handleNav(link.id)}
-                className={`nav-link-glass px-3 py-1.5 rounded-full text-[12px] font-bold tracking-[0.06em] uppercase transition-all duration-300 ${
+                className={`px-3 py-1.5 rounded-full text-[12px] font-bold tracking-[0.06em] uppercase transition-all duration-200 ${
                   isActive(link.id)
-                    ? "nav-link-active text-white"
-                    : "text-white/45 hover:text-white"
+                    ? "text-white bg-white/10"
+                    : "text-white/45 hover:text-white hover:bg-white/[0.04]"
                 }`}
                 style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}
               >
@@ -265,7 +238,7 @@ export default function Navbar() {
           MOBILE MENU OVERLAY
           ═══════════════════════════════════════════ */}
       {mobileMenuOpen && (
-        <div className="md:hidden fixed inset-0 z-[110] bg-[#050507]/98 backdrop-blur-2xl pt-28 px-6 fade-in">
+        <div className="md:hidden fixed inset-0 z-[60] bg-[#050507]/98 backdrop-blur-2xl pt-28 px-6 fade-in">
           <button
             onClick={() => setMobileMenuOpen(false)}
             className="absolute top-6 right-6 p-2 text-white/40 hover:text-white"
@@ -317,7 +290,7 @@ export default function Navbar() {
           SEARCH MODAL
           ═══════════════════════════════════════════ */}
       {searchOpen && (
-        <div className="fixed inset-0 z-[120] flex items-start justify-center pt-[15vh]" onClick={() => setSearchOpen(false)}>
+        <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh]" onClick={() => setSearchOpen(false)}>
           <div className="absolute inset-0 bg-[#050507]/80 backdrop-blur-sm" />
           <div className="relative w-full max-w-xl mx-4 bg-[#0d0d10] rounded-2xl overflow-hidden shadow-2xl shadow-black/60 border border-white/[0.07]" onClick={e => e.stopPropagation()}>
             <form onSubmit={handleSearch} className="flex items-center gap-3 p-4">
@@ -350,7 +323,7 @@ export default function Navbar() {
       {/* ═══════════════════════════════════════════
           MOBILE BOTTOM NAV
           ═══════════════════════════════════════════ */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-[100] bg-[#0d0d10]/95 backdrop-blur-xl border-t border-white/[0.06]">
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#0d0d10]/95 backdrop-blur-xl border-t border-white/[0.06]">
         <div className="flex items-center justify-around py-2 px-2" style={{ paddingBottom: 'max(8px, env(safe-area-inset-bottom))' }}>
           {bottomNavItems.map(item => {
             const IconComp = item.icon;

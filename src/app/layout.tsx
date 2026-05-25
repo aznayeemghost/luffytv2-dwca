@@ -43,9 +43,6 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
-      </head>
       <body
         suppressHydrationWarning
         className={`${geistSans.variable} ${geistMono.variable} ${spaceMono.variable} ${inter.variable} antialiased bg-[#050507] text-[#e2e8f0] selection:bg-[#7c6cf0]/30 selection:text-white`}

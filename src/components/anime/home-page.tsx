@@ -196,19 +196,6 @@ const stats = [
   },
   {
     icon: (
-      <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="#f0a04b" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-        <rect x="2" y="7" width="20" height="15" rx="2" ry="2" />
-        <polyline points="17 2 12 7 7 2" />
-      </svg>
-    ),
-    targetValue: 3000,
-    suffix: "+",
-    label: "TV SHOWS",
-    color: "#f0a04b",
-    duration: 2000,
-  },
-  {
-    icon: (
       <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="#2dd4a0" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="10" />
         <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
@@ -347,7 +334,7 @@ function StatsSection() {
 
   return (
     <section ref={ref} className="lunar-section py-20 px-6 max-w-5xl mx-auto">
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((stat) => (
           <div key={stat.label} className="lunar-stat-card flex flex-col items-center gap-3">
             <div className="flex items-center justify-center">{stat.icon}</div>
@@ -586,7 +573,7 @@ export default function HomePage() {
           Scrolling marquee of popular anime titles
           with Japanese text — placed right below hero
           ══════════════════════════════════════════ */}
-      <div className="mt-4 w-full overflow-hidden bg-white/[0.015] border-y border-white/[0.06]">
+      <div className="w-full overflow-hidden bg-white/[0.015] border-y border-white/[0.06]">
         <div className="lunar-ticker-track py-3">
           {[...tickerItems, ...tickerItems].map((item, i) => (
             <span
