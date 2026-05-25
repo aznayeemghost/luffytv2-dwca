@@ -125,7 +125,7 @@ type Route =
 // ============================================================
 
 // Section sub-page type — each section can have its own sub-navigation
-export type SectionSubPage = "home" | "schedule" | "genres" | "trending" | "top-rated";
+export type SectionSubPage = "home" | "schedule" | "genres" | "trending" | "top-rated" | "tv-channels" | "sports";
 
 interface AppState {
   route: Route;
@@ -221,6 +221,14 @@ export function getSectionNavLinks(route: Route): { id: SectionSubPage; label: s
       { id: "home", label: "Home" },
       { id: "trending", label: "Trending" },
       { id: "top-rated", label: "Top Rated" },
+    ];
+  }
+  
+  // Live TV section — 2 sub-tabs
+  if (page === "live" || page === "live-watch") {
+    return [
+      { id: "tv-channels", label: "Live TV" },
+      { id: "sports", label: "Sports" },
     ];
   }
   

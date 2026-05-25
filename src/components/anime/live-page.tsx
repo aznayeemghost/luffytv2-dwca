@@ -4,12 +4,26 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useAppStore } from "./store";
 
 // ============================================================
-// LIVE TV & SPORTS — Beautiful Redesign
+// LIVE TV & SPORTS — Two-Tab Redesign
+// TAB 1: Live TV — TV channels grid (cdnlivetv 762 channels)
+// TAB 2: Sports — Live sports matches with countdown timers
 // - Featured live hero at top
 // - Prominent countdown timers for upcoming matches
 // - Time-based sections: Live Now, Starting Soon, Today, Later
 // - Beautiful card design with team badges & sport colors
 // ============================================================
+
+// ── Channel category icons ──
+const channelCategories = [
+  { id: "all", label: "All Channels", icon: "📺", color: "#7c6cf0" },
+  { id: "sports", label: "Sports", icon: "⚽", color: "#22c55e" },
+  { id: "news", label: "News", icon: "📰", color: "#3b82f6" },
+  { id: "entertainment", label: "Entertainment", icon: "🎬", color: "#f97316" },
+  { id: "music", label: "Music", icon: "🎵", color: "#a855f7" },
+  { id: "kids", label: "Kids", icon: "🧸", color: "#ec4899" },
+  { id: "documentary", label: "Docs", icon: "🌍", color: "#14b8a6" },
+  { id: "religious", label: "Religious", icon: "🕊️", color: "#eab308" },
+];
 
 const defaultSportCategories = [
   { id: "all", label: "All Sports", icon: "🏟️", color: "#7c6cf0" },
@@ -60,6 +74,16 @@ interface LiveMatch {
   sportsrcId?: string;
 }
 
+interface TVChannel {
+  id: string;
+  name: string;
+  code: string;
+  image: string;
+  status: string;
+  country: string;
+  category: string;
+}
+
 interface SportCategory {
   id: string;
   name: string;
@@ -73,6 +97,31 @@ function getSportColor(sport: string): string {
 function getSportIcon(sport: string): string {
   const cat = defaultSportCategories.find(c => c.id === sport);
   return cat?.icon || "📺";
+}
+
+// Detect channel category from name/code
+function detectChannelCategory(name: string, code: string): string {
+  const n = (name + " " + code).toLowerCase();
+  if (/sport|espn|fox sport|bein|sky sport|nfl|nba|mlb|nhl|ufc|wwe|fight|cricket|golf|tennis|football|soccer|basketball|baseball|hockey/.test(n)) return "sports";
+  if (/news|cnn|bbc|al jazeera|reuters|nbc news|abc news|fox news|sky news|cbs/.test(n)) return "news";
+  if (/movie|film|cinema|hbo|showtime|starz|comedy|fx|amc|tnt|tbs/.test(n)) return "entertainment";
+  if (/music|mtv|vh1|bet|cmt|radio/.test(n)) return "music";
+  if (/kids|cartoon|disney|nick|nickelodeon|pbs|baby|junior/.test(n)) return "kids";
+  if (/doc|national geo|discovery|animal|history|science|nature/.test(n)) return "documentary";
+  if (/church|prayer|god|faith|christian|islam|bible|religious|god/.test(n)) return "religious";
+  return "entertainment";
+}
+
+// Get country flag from country code
+function getCountryFlag(code: string): string {
+  if (!code || code.length !== 2) return "🌍";
+  const flags: Record<string, string> = {
+    us: "🇺🇸", uk: "🇬🇧", gb: "🇬🇧", in: "🇮🇳", pk: "🇵🇰", bd: "🇧🇩",
+    de: "🇩🇪", fr: "🇫🇷", es: "🇪🇸", it: "🇮🇹", br: "🇧🇷", mx: "🇲🇽",
+    ar: "🇦🇷", jp: "🇯🇵", kr: "🇰🇷", cn: "🇨🇳", tr: "🇹🇷", sa: "🇸🇦",
+    ae: "🇦🇪", eg: "🇪🇬", ng: "🇳🇬", za: "🇿🇦", au: "🇦🇺", ca: "🇨🇦",
+  };
+  return flags[code.toLowerCase()] || "🌍";
 }
 
 // ── Live Pulse Badge ──
@@ -105,7 +154,7 @@ function formatMatchTime(timestamp: number): string {
   return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) + `, ${time}`;
 }
 
-// ── BIG Countdown Timer for hero & upcoming section ──
+// ── BIG Countdown Timer ──
 function BigCountdown({ targetDate, sportColor }: { targetDate: number; sportColor: string }) {
   const [timeLeft, setTimeLeft] = useState({ d: 0, h: 0, m: 0, s: 0, total: 0 });
 
@@ -147,32 +196,24 @@ function BigCountdown({ targetDate, sportColor }: { targetDate: number; sportCol
         {timeLeft.d > 0 && (
           <>
             <div className="flex flex-col items-center">
-              <span className="w-12 h-12 flex items-center justify-center rounded-lg text-lg font-black" style={{ background: `${sportColor}20`, color: sportColor }}>
-                {timeLeft.d}
-              </span>
+              <span className="w-12 h-12 flex items-center justify-center rounded-lg text-lg font-black" style={{ background: `${sportColor}20`, color: sportColor }}>{timeLeft.d}</span>
               <span className="text-[8px] text-white/20 mt-0.5 uppercase">days</span>
             </div>
             <span className="text-lg font-bold text-white/15 -mt-3">:</span>
           </>
         )}
         <div className="flex flex-col items-center">
-          <span className="w-12 h-12 flex items-center justify-center rounded-lg text-lg font-black" style={{ background: `${sportColor}20`, color: sportColor }}>
-            {pad(timeLeft.h)}
-          </span>
+          <span className="w-12 h-12 flex items-center justify-center rounded-lg text-lg font-black" style={{ background: `${sportColor}20`, color: sportColor }}>{pad(timeLeft.h)}</span>
           <span className="text-[8px] text-white/20 mt-0.5 uppercase">hrs</span>
         </div>
         <span className="text-lg font-bold text-white/15 -mt-3">:</span>
         <div className="flex flex-col items-center">
-          <span className="w-12 h-12 flex items-center justify-center rounded-lg text-lg font-black" style={{ background: `${sportColor}20`, color: sportColor }}>
-            {pad(timeLeft.m)}
-          </span>
+          <span className="w-12 h-12 flex items-center justify-center rounded-lg text-lg font-black" style={{ background: `${sportColor}20`, color: sportColor }}>{pad(timeLeft.m)}</span>
           <span className="text-[8px] text-white/20 mt-0.5 uppercase">min</span>
         </div>
         <span className="text-lg font-bold text-white/15 -mt-3">:</span>
         <div className="flex flex-col items-center">
-          <span className="w-12 h-12 flex items-center justify-center rounded-lg text-lg font-black" style={{ background: `${sportColor}20`, color: sportColor }}>
-            {pad(timeLeft.s)}
-          </span>
+          <span className="w-12 h-12 flex items-center justify-center rounded-lg text-lg font-black" style={{ background: `${sportColor}20`, color: sportColor }}>{pad(timeLeft.s)}</span>
           <span className="text-[8px] text-white/20 mt-0.5 uppercase">sec</span>
         </div>
       </div>
@@ -200,7 +241,6 @@ function MiniCountdown({ targetDate, sportColor }: { targetDate: number; sportCo
   }, [targetDate]);
 
   const pad = (n: number) => String(n).padStart(2, "0");
-
   if (timeLeft.total <= 0) return <span className="text-[9px] text-red-400 font-bold animate-pulse">STARTING!</span>;
 
   return (
@@ -214,6 +254,69 @@ function MiniCountdown({ targetDate, sportColor }: { targetDate: number; sportCo
   );
 }
 
+// ═══════════════════════════════════════════════════════════════
+// TV CHANNEL CARD — Beautiful channel card with logo
+// ═══════════════════════════════════════════════════════════════
+function ChannelCard({ channel, onWatch }: { channel: TVChannel; onWatch: (ch: TVChannel) => void }) {
+  const catInfo = channelCategories.find(c => c.id === channel.category) || channelCategories[1];
+  const isOnline = channel.status === "online";
+
+  return (
+    <button
+      onClick={() => onWatch(channel)}
+      className="group relative flex flex-col items-center gap-3 p-4 rounded-2xl bg-white/[0.02] border border-white/[0.06] hover:border-white/[0.12] hover:bg-white/[0.04] transition-all duration-300 hover:scale-[1.03] hover:shadow-lg"
+    >
+      {/* Glow on hover */}
+      <div
+        className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none rounded-2xl"
+        style={{ background: `radial-gradient(ellipse at center, ${catInfo.color}12 0%, transparent 70%)` }}
+      />
+
+      {/* Channel Logo */}
+      <div className="relative z-[1] w-16 h-16 rounded-xl bg-white/[0.04] border border-white/[0.06] group-hover:border-white/[0.1] flex items-center justify-center overflow-hidden transition-all">
+        {channel.image ? (
+          <img
+            src={channel.image}
+            alt={channel.name}
+            className="w-12 h-12 object-contain rounded-lg"
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = "none";
+              (e.target as HTMLImageElement).parentElement!.innerHTML = `<span class="text-xl font-bold" style="color:${catInfo.color}">${channel.name.charAt(0)}</span>`;
+            }}
+          />
+        ) : (
+          <span className="text-xl font-bold" style={{ color: catInfo.color }}>{channel.name.charAt(0)}</span>
+        )}
+        {/* Online indicator */}
+        {isOnline && (
+          <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]" />
+        )}
+      </div>
+
+      {/* Channel Name */}
+      <div className="relative z-[1] text-center min-w-0 w-full">
+        <span
+          className="text-[11px] font-bold text-white/80 group-hover:text-white transition-colors block truncate"
+          style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}
+        >
+          {channel.name}
+        </span>
+        <span className="text-[9px] text-white/25 mt-0.5 block">
+          {getCountryFlag(channel.code.slice(0, 2))} {channel.code.toUpperCase()}
+        </span>
+      </div>
+
+      {/* Category tag */}
+      <span
+        className="relative z-[1] text-[8px] font-bold px-2 py-0.5 rounded-full"
+        style={{ background: `${catInfo.color}15`, color: `${catInfo.color}80` }}
+      >
+        {catInfo.icon} {catInfo.label}
+      </span>
+    </button>
+  );
+}
+
 // ── Match Card ──
 function MatchCard({ match, onWatch, variant = "default" }: { match: LiveMatch; onWatch: (m: LiveMatch) => void; variant?: "default" | "featured" }) {
   const sportColor = getSportColor(match.sport);
@@ -221,22 +324,17 @@ function MatchCard({ match, onWatch, variant = "default" }: { match: LiveMatch; 
   const hasTeams = match.homeTeam || match.awayTeam;
   const hasStreams = match.sources && match.sources.length > 0;
   const isUpcoming = match.date > 0 && match.date > Date.now();
-  const isStartingSoon = isUpcoming && match.date - Date.now() < 3600000; // < 1 hour
+  const isStartingSoon = isUpcoming && match.date - Date.now() < 3600000;
 
   if (variant === "featured") {
     return (
       <div className="group relative bg-white/[0.02] border border-white/[0.06] hover:border-white/[0.12] rounded-2xl overflow-hidden transition-all duration-300">
-        {/* Top color bar */}
         <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${sportColor}, ${sportColor}50, transparent)` }} />
-
         <div className="p-6">
-          {/* Sport badge + live pulse */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <span className="text-sm">{sportIcon}</span>
-              <span className="text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>
-                {match.sportName}
-              </span>
+              <span className="text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>{match.sportName}</span>
             </div>
             <div className="flex items-center gap-2">
               {match.isLive && <LivePulse size="md" />}
@@ -244,33 +342,24 @@ function MatchCard({ match, onWatch, variant = "default" }: { match: LiveMatch; 
             </div>
           </div>
 
-          {/* Teams section */}
           {hasTeams ? (
             <div className="flex items-center gap-4 mb-5">
               <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
                 {match.homeBadge ? (
                   <img src={match.homeBadge} alt={match.homeTeam} className="w-14 h-14 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                 ) : (
-                  <div className="w-14 h-14 rounded-xl flex items-center justify-center text-xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>
-                    {match.homeTeam?.charAt(0) || "H"}
-                  </div>
+                  <div className="w-14 h-14 rounded-xl flex items-center justify-center text-xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{match.homeTeam?.charAt(0) || "H"}</div>
                 )}
                 <span className="text-xs text-white/80 font-semibold text-center truncate w-full">{match.homeTeam || "Home"}</span>
               </div>
               <div className="flex flex-col items-center gap-1 px-3">
-                {isUpcoming && !match.isLive ? (
-                  <BigCountdown targetDate={match.date} sportColor={sportColor} />
-                ) : (
-                  <span className="text-lg font-black text-white/15 tracking-widest">VS</span>
-                )}
+                {isUpcoming && !match.isLive ? <BigCountdown targetDate={match.date} sportColor={sportColor} /> : <span className="text-lg font-black text-white/15 tracking-widest">VS</span>}
               </div>
               <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
                 {match.awayBadge ? (
                   <img src={match.awayBadge} alt={match.awayTeam} className="w-14 h-14 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                 ) : (
-                  <div className="w-14 h-14 rounded-xl flex items-center justify-center text-xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>
-                    {match.awayTeam?.charAt(0) || "A"}
-                  </div>
+                  <div className="w-14 h-14 rounded-xl flex items-center justify-center text-xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{match.awayTeam?.charAt(0) || "A"}</div>
                 )}
                 <span className="text-xs text-white/80 font-semibold text-center truncate w-full">{match.awayTeam || "Away"}</span>
               </div>
@@ -279,7 +368,6 @@ function MatchCard({ match, onWatch, variant = "default" }: { match: LiveMatch; 
             <h3 className="text-base text-white/90 font-semibold line-clamp-2 leading-snug mb-4">{match.title}</h3>
           )}
 
-          {/* Schedule info */}
           {match.date > 0 && (
             <div className="flex items-center justify-between mb-4 px-2 py-2 rounded-lg bg-white/[0.02]">
               <p className="text-[11px] text-white/40 font-medium">{formatMatchTime(match.date)}</p>
@@ -287,7 +375,6 @@ function MatchCard({ match, onWatch, variant = "default" }: { match: LiveMatch; 
             </div>
           )}
 
-          {/* Watch button */}
           <button
             onClick={() => onWatch(match)}
             className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-[12px] font-bold uppercase tracking-wider transition-all"
@@ -305,59 +392,43 @@ function MatchCard({ match, onWatch, variant = "default" }: { match: LiveMatch; 
     );
   }
 
-  // Default card (compact)
+  // Default compact card
   return (
     <div
       className="group relative bg-white/[0.02] border border-white/[0.06] hover:border-white/[0.12] rounded-xl overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:shadow-lg cursor-pointer"
       onClick={() => onWatch(match)}
     >
-      {/* Top accent */}
       <div className="h-[3px] w-full" style={{ background: `linear-gradient(90deg, ${sportColor}, transparent)` }} />
-
       <div className="p-4">
-        {/* Header: sport + status */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-1.5">
             <span className="text-xs">{sportIcon}</span>
-            <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>
-              {match.sportName}
-            </span>
+            <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>{match.sportName}</span>
           </div>
           <div className="flex items-center gap-1.5">
             {match.isLive && <LivePulse />}
-            {isStartingSoon && !match.isLive && (
-              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 animate-pulse">SOON</span>
-            )}
+            {isStartingSoon && !match.isLive && (<span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 animate-pulse">SOON</span>)}
           </div>
         </div>
 
-        {/* Teams or title */}
         {hasTeams ? (
           <div className="flex items-center gap-2 mb-3">
             <div className="flex flex-col items-center gap-1 flex-1 min-w-0">
               {match.homeBadge ? (
                 <img src={match.homeBadge} alt={match.homeTeam} className="w-9 h-9 object-contain rounded-lg bg-white/5" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
               ) : (
-                <div className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>
-                  {match.homeTeam?.charAt(0) || "H"}
-                </div>
+                <div className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{match.homeTeam?.charAt(0) || "H"}</div>
               )}
               <span className="text-[10px] text-white/60 font-medium text-center truncate w-full">{match.homeTeam || "Home"}</span>
             </div>
             <div className="flex flex-col items-center px-1">
-              {isUpcoming && !match.isLive ? (
-                <MiniCountdown targetDate={match.date} sportColor={sportColor} />
-              ) : (
-                <span className="text-[10px] font-black text-white/15 tracking-wider">VS</span>
-              )}
+              {isUpcoming && !match.isLive ? <MiniCountdown targetDate={match.date} sportColor={sportColor} /> : <span className="text-[10px] font-black text-white/15 tracking-wider">VS</span>}
             </div>
             <div className="flex flex-col items-center gap-1 flex-1 min-w-0">
               {match.awayBadge ? (
                 <img src={match.awayBadge} alt={match.awayTeam} className="w-9 h-9 object-contain rounded-lg bg-white/5" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
               ) : (
-                <div className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>
-                  {match.awayTeam?.charAt(0) || "A"}
-                </div>
+                <div className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{match.awayTeam?.charAt(0) || "A"}</div>
               )}
               <span className="text-[10px] text-white/60 font-medium text-center truncate w-full">{match.awayTeam || "Away"}</span>
             </div>
@@ -366,16 +437,9 @@ function MatchCard({ match, onWatch, variant = "default" }: { match: LiveMatch; 
           <h3 className="text-[12px] text-white/80 font-semibold line-clamp-2 leading-snug mb-2">{match.title}</h3>
         )}
 
-        {/* Footer: time + sources */}
         <div className="flex items-center justify-between pt-2 border-t border-white/[0.04]">
-          {match.date > 0 ? (
-            <p className="text-[9px] text-white/25">{formatMatchTime(match.date)}</p>
-          ) : (
-            <span />
-          )}
-          <span className="text-[9px] text-white/20">
-            {hasStreams ? `${match.sources.length} src` : ""}
-          </span>
+          {match.date > 0 ? <p className="text-[9px] text-white/25">{formatMatchTime(match.date)}</p> : <span />}
+          <span className="text-[9px] text-white/20">{hasStreams ? `${match.sources.length} src` : ""}</span>
         </div>
       </div>
     </div>
@@ -400,11 +464,27 @@ function SectionHeader({ icon, title, subtitle, color, count }: { icon: string; 
   );
 }
 
-// ============================================================
-// LIVE PAGE
-// ============================================================
+// ═══════════════════════════════════════════════════════════════
+// MAIN LIVE PAGE — Two-Tab Layout
+// ═══════════════════════════════════════════════════════════════
 export default function LivePage() {
   const navigate = useAppStore(s => s.navigate);
+  const sectionSubPage = useAppStore(s => s.sectionSubPage);
+  const setSectionSubPage = useAppStore(s => s.setSectionSubPage);
+
+  // ── Main tab: "tv" or "sports" — synced with navbar ──
+  const activeTab = sectionSubPage === "sports" ? "sports" : "tv";
+  const setActiveTab = (tab: "tv" | "sports") => {
+    setSectionSubPage(tab === "sports" ? "sports" : "tv-channels");
+  };
+
+  // ── TV Channels state ──
+  const [channels, setChannels] = useState<TVChannel[]>([]);
+  const [channelSearch, setChannelSearch] = useState("");
+  const [channelCategory, setChannelCategory] = useState("all");
+  const [channelsLoading, setChannelsLoading] = useState(true);
+
+  // ── Sports state ──
   const [selectedSport, setSelectedSport] = useState("all");
   const [matches, setMatches] = useState<LiveMatch[]>([]);
   const [liveIds, setLiveIds] = useState<Set<string>>(new Set());
@@ -413,6 +493,32 @@ export default function LivePage() {
   const [error, setError] = useState("");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
+  // ── Fetch TV Channels ──
+  useEffect(() => {
+    const fetchChannels = async () => {
+      setChannelsLoading(true);
+      try {
+        const res = await fetch("/api/live?mode=tv");
+        if (res.ok) {
+          const data = await res.json();
+          const rawChannels: TVChannel[] = (data.matches || []).map((ch: any) => ({
+            id: ch.id,
+            name: ch.homeTeam || ch.title || "",
+            code: ch.awayTeam?.toLowerCase() || ch.channelCode || "",
+            image: ch.homeBadge || ch.poster || "",
+            status: ch.isLive ? "online" : "offline",
+            country: ch.awayTeam?.slice(0, 2) || "",
+            category: detectChannelCategory(ch.homeTeam || ch.title || "", ch.awayTeam || ""),
+          }));
+          setChannels(rawChannels);
+        }
+      } catch {}
+      setChannelsLoading(false);
+    };
+    fetchChannels();
+  }, []);
+
+  // ── Fetch Sports ──
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -492,6 +598,42 @@ export default function LivePage() {
     } as any);
   };
 
+  const handleWatchChannel = (channel: TVChannel) => {
+    navigate({
+      page: "live-watch",
+      matchId: channel.id,
+      matchTitle: channel.name,
+      matchSport: "other",
+      matchSportName: "TV Channel",
+      matchHomeTeam: channel.name,
+      matchAwayTeam: channel.code.toUpperCase(),
+      matchHomeBadge: channel.image,
+      matchAwayBadge: "",
+      matchPoster: channel.image,
+      matchPopular: false,
+      matchSources: "[]",
+      matchDate: 0,
+      matchChannelName: channel.name,
+      matchChannelCode: channel.code,
+      matchApiSource: "cdnlivetv",
+    } as any);
+  };
+
+  // ── Filter channels ──
+  const filteredChannels = useMemo(() => {
+    let result = channels;
+    if (channelCategory !== "all") {
+      result = result.filter(ch => ch.category === channelCategory);
+    }
+    if (channelSearch.trim()) {
+      const q = channelSearch.toLowerCase();
+      result = result.filter(ch => ch.name.toLowerCase().includes(q) || ch.code.toLowerCase().includes(q));
+    }
+    return result;
+  }, [channels, channelCategory, channelSearch]);
+
+  const onlineCount = filteredChannels.filter(ch => ch.status === "online").length;
+
   // ── Group matches by time ──
   const now = Date.now();
   const filteredMatches = useMemo(() => matches.filter(m => selectedSport === "all" || m.sport === selectedSport), [matches, selectedSport]);
@@ -510,201 +652,307 @@ export default function LivePage() {
     return apiSport ? { ...cat, label: apiSport.name || cat.label } : cat;
   });
 
-  // Featured match = first live match or first upcoming match
   const featuredMatch = liveMatches[0] || startingSoon[0] || todayUpcoming[0] || null;
 
   return (
     <div className="min-h-screen pb-8">
-      {/* ── HERO ── */}
-      <div className="relative mb-8 -mx-4 lg:-mx-8 px-4 lg:px-8">
+      {/* ══════════════════════════════════════════
+          HERO — Title + Two Tab Switcher
+          ══════════════════════════════════════════ */}
+      <div className="relative mb-6 -mx-4 lg:-mx-8 px-4 lg:px-8">
         <div className="absolute inset-0 bg-gradient-to-b from-red-500/[0.03] via-[#7c6cf0]/[0.02] to-transparent pointer-events-none" />
-        <div className="relative pt-4 pb-6">
+        <div className="relative pt-4 pb-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
               <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/20 mb-3">
                 <LivePulse size="md" />
-                <span className="text-[11px] font-bold text-red-400/80 uppercase tracking-wider">Live Sports</span>
-                {liveIds.size > 0 && <span className="text-[11px] font-bold text-red-300/50">{liveIds.size} live</span>}
+                <span className="text-[11px] font-bold text-red-400/80 uppercase tracking-wider">
+                  {activeTab === "tv" ? "Live TV" : "Live Sports"}
+                </span>
+                {activeTab === "tv" && channels.length > 0 && (
+                  <span className="text-[11px] font-bold text-emerald-400/60">{onlineCount} online</span>
+                )}
+                {activeTab === "sports" && liveIds.size > 0 && (
+                  <span className="text-[11px] font-bold text-red-300/50">{liveIds.size} live</span>
+                )}
               </div>
               <h1 className="text-2xl sm:text-3xl font-bold text-white mb-1" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>
-                Live TV & Sports
+                {activeTab === "tv" ? "Live TV Channels" : "Live Sports"}
               </h1>
               <p className="text-sm text-white/25">
-                Watch live sports with countdown timers. Multiple sources for every match.
+                {activeTab === "tv"
+                  ? "Watch 762+ TV channels from around the world. Sports, news, entertainment & more."
+                  : "Watch live sports with countdown timers. Multiple sources for every match."}
               </p>
             </div>
+
             <div className="flex items-center gap-3 flex-shrink-0">
               {lastUpdated && (
-                <span className="text-[9px] text-white/15">
-                  Updated {lastUpdated.toLocaleTimeString()}
-                </span>
+                <span className="text-[9px] text-white/15">Updated {lastUpdated.toLocaleTimeString()}</span>
               )}
-              <button onClick={fetchData} disabled={loading} className="p-2 rounded-lg bg-white/[0.04] text-white/30 hover:text-white/60 hover:bg-white/[0.06] transition-all disabled:opacity-50">
-                <svg className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16" />
-                </svg>
-              </button>
+              {activeTab === "sports" && (
+                <button onClick={fetchData} disabled={loading} className="p-2 rounded-lg bg-white/[0.04] text-white/30 hover:text-white/60 hover:bg-white/[0.06] transition-all disabled:opacity-50">
+                  <svg className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16" />
+                  </svg>
+                </button>
+              )}
             </div>
           </div>
+
+          {/* ── TAB SWITCHER ── */}
+          <div className="mt-5 flex items-center gap-1 p-1 bg-white/[0.03] rounded-xl border border-white/[0.06] w-fit">
+            <button
+              onClick={() => setActiveTab("tv")}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-[12px] font-bold uppercase tracking-wider transition-all duration-200 ${
+                activeTab === "tv"
+                  ? "bg-[#7c6cf0] text-white shadow-[0_0_16px_rgba(124,108,240,0.3)]"
+                  : "text-white/35 hover:text-white/60 hover:bg-white/[0.04]"
+              }`}
+              style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="7" width="20" height="15" rx="2" ry="2" />
+                <polyline points="17 2 12 7 7 2" />
+              </svg>
+              Live TV
+              {channels.length > 0 && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/20">{channels.length}</span>}
+            </button>
+            <button
+              onClick={() => setActiveTab("sports")}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-[12px] font-bold uppercase tracking-wider transition-all duration-200 ${
+                activeTab === "sports"
+                  ? "bg-[#7c6cf0] text-white shadow-[0_0_16px_rgba(124,108,240,0.3)]"
+                  : "text-white/35 hover:text-white/60 hover:bg-white/[0.04]"
+              }`}
+              style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 2a10 10 0 0110 10" />
+                <path d="M12 2a10 10 0 00-7 17" />
+              </svg>
+              Sports
+              {liveIds.size > 0 && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-red-500/30 text-red-300">{liveIds.size}</span>}
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* ── SPORT CATEGORY FILTERS ── */}
-      <div className="flex gap-2 overflow-x-auto pb-4 mb-6 scrollbar-hide -mx-1 px-1">
-        {displayCategories.filter(cat => cat.id === "all" || sportCounts[cat.id]).map(cat => (
-          <button
-            key={cat.id}
-            onClick={() => setSelectedSport(cat.id)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap transition-all ${
-              selectedSport === cat.id ? "text-white shadow-[0_0_12px_rgba(0,0,0,0.3)]" : "bg-white/[0.03] text-white/35 hover:text-white/55 hover:bg-white/[0.05] border border-white/[0.04]"
-            }`}
-            style={{
-              fontFamily: "var(--font-space-mono), 'Space Mono', monospace",
-              ...(selectedSport === cat.id ? { background: `linear-gradient(135deg, ${cat.color}30, ${cat.color}15)`, border: `1px solid ${cat.color}40` } : {}),
-            }}
-          >
-            <span className="text-sm">{cat.icon}</span>
-            {cat.label}
-            {sportCounts[cat.id] && <span className="text-[9px] opacity-50">{sportCounts[cat.id]}</span>}
-          </button>
-        ))}
-      </div>
+      {/* ══════════════════════════════════════════
+          TAB 1: LIVE TV — Channel Grid
+          ══════════════════════════════════════════ */}
+      {activeTab === "tv" && (
+        <>
+          {/* Search + Category filters */}
+          <div className="mb-6 space-y-4">
+            {/* Search bar */}
+            <div className="relative max-w-lg">
+              <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/25" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input
+                type="text"
+                value={channelSearch}
+                onChange={e => setChannelSearch(e.target.value)}
+                placeholder="Search channels..."
+                className="w-full pl-11 pr-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.06] text-[14px] text-white placeholder-white/25 outline-none focus:border-[#7c6cf0]/40 focus:bg-white/[0.04] transition-all"
+                style={{ fontFamily: "var(--font-inter), 'Inter', sans-serif" }}
+              />
+            </div>
 
-      {/* ── LOADING ── */}
-      {loading && matches.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-20 gap-4">
-          <div className="w-12 h-12 rounded-full border-2 border-[#7c6cf0]/30 border-t-[#7c6cf0] animate-spin" />
-          <p className="text-sm text-white/30">Loading matches...</p>
-          <p className="text-[10px] text-white/15">Fetching from streamfree + cdnlivetv + dami-tv + watchfooty + more</p>
-        </div>
-      )}
-
-      {/* ── ERROR ── */}
-      {error && !loading && (
-        <div className="flex flex-col items-center justify-center py-20 gap-4">
-          <div className="w-14 h-14 rounded-full bg-red-500/10 flex items-center justify-center">
-            <svg className="w-7 h-7 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
+            {/* Category pills */}
+            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-1 px-1">
+              {channelCategories.map(cat => {
+                const count = cat.id === "all" ? channels.length : channels.filter(ch => ch.category === cat.id).length;
+                if (cat.id !== "all" && count === 0) return null;
+                return (
+                  <button
+                    key={cat.id}
+                    onClick={() => setChannelCategory(cat.id)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap transition-all ${
+                      channelCategory === cat.id ? "text-white shadow-[0_0_12px_rgba(0,0,0,0.3)]" : "bg-white/[0.03] text-white/35 hover:text-white/55 hover:bg-white/[0.05] border border-white/[0.04]"
+                    }`}
+                    style={{
+                      fontFamily: "var(--font-space-mono), 'Space Mono', monospace",
+                      ...(channelCategory === cat.id ? { background: `linear-gradient(135deg, ${cat.color}30, ${cat.color}15)`, border: `1px solid ${cat.color}40` } : {}),
+                    }}
+                  >
+                    <span className="text-sm">{cat.icon}</span>
+                    {cat.label}
+                    {count > 0 && <span className="text-[9px] opacity-50">{count}</span>}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          <p className="text-sm text-white/50">Failed to load data</p>
-          <p className="text-[10px] text-white/25">{error}</p>
-          <button onClick={fetchData} className="px-4 py-2 rounded-full bg-[#7c6cf0] text-white text-[11px] font-bold uppercase tracking-wider hover:bg-[#6b5ce0] transition-all">Try Again</button>
-        </div>
+
+          {/* Channels loading */}
+          {channelsLoading && channels.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 gap-4">
+              <div className="w-12 h-12 rounded-full border-2 border-[#7c6cf0]/30 border-t-[#7c6cf0] animate-spin" />
+              <p className="text-sm text-white/30">Loading channels...</p>
+              <p className="text-[10px] text-white/15">Fetching 762+ TV channels from cdnlivetv</p>
+            </div>
+          )}
+
+          {/* Channel grid */}
+          {!channelsLoading && filteredChannels.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+              {filteredChannels.map(channel => (
+                <ChannelCard key={channel.id} channel={channel} onWatch={handleWatchChannel} />
+              ))}
+            </div>
+          )}
+
+          {/* No channels found */}
+          {!channelsLoading && filteredChannels.length === 0 && channels.length > 0 && (
+            <div className="flex flex-col items-center justify-center py-20 gap-4">
+              <div className="text-5xl">📺</div>
+              <p className="text-sm text-white/40">No channels found</p>
+              <p className="text-[10px] text-white/20">Try a different search or category</p>
+              <button onClick={() => { setChannelSearch(""); setChannelCategory("all"); }} className="px-4 py-2 rounded-full bg-white/[0.06] text-white/50 text-[11px] font-bold hover:bg-white/[0.08] transition-all">Show All</button>
+            </div>
+          )}
+
+          {/* No channels at all */}
+          {!channelsLoading && channels.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 gap-4">
+              <div className="text-5xl">📡</div>
+              <p className="text-sm text-white/40">Could not load channels</p>
+              <p className="text-[10px] text-white/20">The TV channel API might be temporarily unavailable</p>
+            </div>
+          )}
+        </>
       )}
 
-      {/* ── FEATURED LIVE MATCH ── */}
-      {!loading && !error && featuredMatch && (
-        <div className="mb-8">
-          <SectionHeader
-            icon={featuredMatch.isLive ? "🔴" : "⭐"}
-            title={featuredMatch.isLive ? "Featured Live Match" : "Next Up"}
-            subtitle={featuredMatch.isLive ? "Watch now — it's live!" : "Don't miss this match"}
-            color={featuredMatch.isLive ? "#ef4444" : "#f59e0b"}
-            count={1}
-          />
-          <div className="max-w-2xl">
-            <MatchCard match={featuredMatch} onWatch={handleWatchMatch} variant="featured" />
-          </div>
-        </div>
-      )}
-
-      {/* ── LIVE NOW ── */}
-      {!loading && !error && liveMatches.length > 0 && (
-        <div className="mb-8">
-          <SectionHeader
-            icon="🔴"
-            title="Live Now"
-            subtitle="Currently broadcasting"
-            color="#ef4444"
-            count={liveMatches.length}
-          />
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {liveMatches.filter(m => m.id !== featuredMatch?.id).map(match => (
-              <MatchCard key={match.id} match={match} onWatch={handleWatchMatch} />
+      {/* ══════════════════════════════════════════
+          TAB 2: SPORTS — Live Matches
+          ══════════════════════════════════════════ */}
+      {activeTab === "sports" && (
+        <>
+          {/* Sport category filters */}
+          <div className="flex gap-2 overflow-x-auto pb-4 mb-6 scrollbar-hide -mx-1 px-1">
+            {displayCategories.filter(cat => cat.id === "all" || sportCounts[cat.id]).map(cat => (
+              <button
+                key={cat.id}
+                onClick={() => setSelectedSport(cat.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap transition-all ${
+                  selectedSport === cat.id ? "text-white shadow-[0_0_12px_rgba(0,0,0,0.3)]" : "bg-white/[0.03] text-white/35 hover:text-white/55 hover:bg-white/[0.05] border border-white/[0.04]"
+                }`}
+                style={{
+                  fontFamily: "var(--font-space-mono), 'Space Mono', monospace",
+                  ...(selectedSport === cat.id ? { background: `linear-gradient(135deg, ${cat.color}30, ${cat.color}15)`, border: `1px solid ${cat.color}40` } : {}),
+                }}
+              >
+                <span className="text-sm">{cat.icon}</span>
+                {cat.label}
+                {sportCounts[cat.id] && <span className="text-[9px] opacity-50">{sportCounts[cat.id]}</span>}
+              </button>
             ))}
           </div>
-        </div>
-      )}
 
-      {/* ── STARTING SOON (< 1 hour) ── */}
-      {!loading && !error && startingSoon.length > 0 && (
-        <div className="mb-8">
-          <SectionHeader
-            icon="⏰"
-            title="Starting Soon"
-            subtitle="Less than 1 hour until kickoff"
-            color="#f59e0b"
-            count={startingSoon.length}
-          />
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {startingSoon.filter(m => m.id !== featuredMatch?.id).map(match => (
-              <MatchCard key={match.id} match={match} onWatch={handleWatchMatch} />
-            ))}
-          </div>
-        </div>
-      )}
+          {/* Loading */}
+          {loading && matches.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 gap-4">
+              <div className="w-12 h-12 rounded-full border-2 border-[#7c6cf0]/30 border-t-[#7c6cf0] animate-spin" />
+              <p className="text-sm text-white/30">Loading matches...</p>
+              <p className="text-[10px] text-white/15">Fetching from streamfree + cdnlivetv + dami-tv + watchfooty + more</p>
+            </div>
+          )}
 
-      {/* ── UPCOMING TODAY ── */}
-      {!loading && !error && todayUpcoming.length > 0 && (
-        <div className="mb-8">
-          <SectionHeader
-            icon="📅"
-            title="Today's Schedule"
-            subtitle="Matches happening later today"
-            color="#7c6cf0"
-            count={todayUpcoming.length}
-          />
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {todayUpcoming.filter(m => m.id !== featuredMatch?.id).map(match => (
-              <MatchCard key={match.id} match={match} onWatch={handleWatchMatch} />
-            ))}
-          </div>
-        </div>
-      )}
+          {/* Error */}
+          {error && !loading && (
+            <div className="flex flex-col items-center justify-center py-20 gap-4">
+              <div className="w-14 h-14 rounded-full bg-red-500/10 flex items-center justify-center">
+                <svg className="w-7 h-7 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
+              </div>
+              <p className="text-sm text-white/50">Failed to load data</p>
+              <p className="text-[10px] text-white/25">{error}</p>
+              <button onClick={fetchData} className="px-4 py-2 rounded-full bg-[#7c6cf0] text-white text-[11px] font-bold uppercase tracking-wider hover:bg-[#6b5ce0] transition-all">Try Again</button>
+            </div>
+          )}
 
-      {/* ── LATER ── */}
-      {!loading && !error && laterMatches.length > 0 && (
-        <div className="mb-8">
-          <SectionHeader
-            icon="📆"
-            title="Coming Up"
-            subtitle="Upcoming in the next few days"
-            color="#06b6d4"
-            count={laterMatches.length}
-          />
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {laterMatches.map(match => (
-              <MatchCard key={match.id} match={match} onWatch={handleWatchMatch} />
-            ))}
-          </div>
-        </div>
-      )}
+          {/* Featured Live Match */}
+          {!loading && !error && featuredMatch && (
+            <div className="mb-8">
+              <SectionHeader icon={featuredMatch.isLive ? "🔴" : "⭐"} title={featuredMatch.isLive ? "Featured Live Match" : "Next Up"} subtitle={featuredMatch.isLive ? "Watch now — it's live!" : "Don't miss this match"} color={featuredMatch.isLive ? "#ef4444" : "#f59e0b"} count={1} />
+              <div className="max-w-2xl">
+                <MatchCard match={featuredMatch} onWatch={handleWatchMatch} variant="featured" />
+              </div>
+            </div>
+          )}
 
-      {/* ── PAST / FINISHED ── */}
-      {!loading && !error && pastMatches.length > 0 && (
-        <div className="mb-8">
-          <SectionHeader
-            icon="✅"
-            title="Finished"
-            subtitle="Matches that have ended"
-            color="#6b7280"
-            count={pastMatches.length}
-          />
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 opacity-50">
-            {pastMatches.map(match => (
-              <MatchCard key={match.id} match={match} onWatch={handleWatchMatch} />
-            ))}
-          </div>
-        </div>
-      )}
+          {/* Live Now */}
+          {!loading && !error && liveMatches.length > 0 && (
+            <div className="mb-8">
+              <SectionHeader icon="🔴" title="Live Now" subtitle="Currently broadcasting" color="#ef4444" count={liveMatches.length} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {liveMatches.filter(m => m.id !== featuredMatch?.id).map(match => (
+                  <MatchCard key={match.id} match={match} onWatch={handleWatchMatch} />
+                ))}
+              </div>
+            </div>
+          )}
 
-      {/* ── NO MATCHES ── */}
-      {!loading && !error && filteredMatches.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-20 gap-4">
-          <div className="text-5xl">📺</div>
-          <p className="text-sm text-white/40">No matches found</p>
-          <p className="text-[10px] text-white/20">Check back later or try a different sport category</p>
-          <button onClick={() => setSelectedSport("all")} className="px-4 py-2 rounded-full bg-white/[0.06] text-white/50 text-[11px] font-bold hover:bg-white/[0.08] transition-all">Show All Sports</button>
-        </div>
+          {/* Starting Soon */}
+          {!loading && !error && startingSoon.length > 0 && (
+            <div className="mb-8">
+              <SectionHeader icon="⏰" title="Starting Soon" subtitle="Less than 1 hour until kickoff" color="#f59e0b" count={startingSoon.length} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {startingSoon.filter(m => m.id !== featuredMatch?.id).map(match => (
+                  <MatchCard key={match.id} match={match} onWatch={handleWatchMatch} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Today's Schedule */}
+          {!loading && !error && todayUpcoming.length > 0 && (
+            <div className="mb-8">
+              <SectionHeader icon="📅" title="Today's Schedule" subtitle="Matches happening later today" color="#7c6cf0" count={todayUpcoming.length} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {todayUpcoming.filter(m => m.id !== featuredMatch?.id).map(match => (
+                  <MatchCard key={match.id} match={match} onWatch={handleWatchMatch} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Coming Up */}
+          {!loading && !error && laterMatches.length > 0 && (
+            <div className="mb-8">
+              <SectionHeader icon="📆" title="Coming Up" subtitle="Upcoming in the next few days" color="#06b6d4" count={laterMatches.length} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {laterMatches.map(match => (
+                  <MatchCard key={match.id} match={match} onWatch={handleWatchMatch} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Finished */}
+          {!loading && !error && pastMatches.length > 0 && (
+            <div className="mb-8">
+              <SectionHeader icon="✅" title="Finished" subtitle="Matches that have ended" color="#6b7280" count={pastMatches.length} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 opacity-50">
+                {pastMatches.map(match => (
+                  <MatchCard key={match.id} match={match} onWatch={handleWatchMatch} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* No matches */}
+          {!loading && !error && filteredMatches.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 gap-4">
+              <div className="text-5xl">🏟️</div>
+              <p className="text-sm text-white/40">No matches found</p>
+              <p className="text-[10px] text-white/20">Check back later or try a different sport category</p>
+              <button onClick={() => setSelectedSport("all")} className="px-4 py-2 rounded-full bg-white/[0.06] text-white/50 text-[11px] font-bold hover:bg-white/[0.08] transition-all">Show All Sports</button>
+            </div>
+          )}
+        </>
       )}
 
       {/* ── FOOTER ── */}
@@ -719,7 +967,8 @@ export default function LivePage() {
             <span className="text-[9px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400/50 border border-red-500/10">espn</span>
             <span className="text-[9px] px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-400/50 border border-orange-500/10">sportsembed</span>
             <span className="text-[9px] px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-400/50 border border-teal-500/10">embedsports</span>
-            <span className="text-[10px] text-white/15">{matches.length} matches</span>
+            {activeTab === "tv" && <span className="text-[10px] text-white/15">{channels.length} channels</span>}
+            {activeTab === "sports" && <span className="text-[10px] text-white/15">{matches.length} matches</span>}
           </div>
           <button onClick={() => navigate({ page: "watchnow" })} className="text-[10px] text-[#7c6cf0]/50 hover:text-[#7c6cf0] transition-colors">
             ← Back to Watch Now
