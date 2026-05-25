@@ -3,19 +3,20 @@ import { NextResponse } from "next/server";
 // ============================================================
 // LIVE EMBED RESOLVER — Multiple providers, fast resolution
 // Provider 1: streamed.pk → embedsports.top (primary)
-// Provider 2: Direct embedsports.top URLs (backup)
-// Provider 3: Construct alternative embed URLs
+// Provider 2: streamed.watch (same ecosystem, backup)
+// Provider 3: streambtw.com (independent provider)
+// No M3U8 extraction, no CORS proxy. Just embed URLs.
 // ============================================================
 
 const BASE = "https://streamed.pk";
-const TIMEOUT = 8000; // Fast timeout
+const TIMEOUT = 8000;
 
-// Source priority: tested working sources first
+// Source priority
 const SOURCE_PRIORITY: Record<string, number> = {
-  delta: 1,    // Live events - confirmed working
-  admin: 2,    // PPV/Channels - confirmed working (multiple servers)
-  golf: 3,     // Sports channels - confirmed working
-  echo: 4,     // Sometimes works, sometimes empty
+  delta: 1,
+  admin: 2,
+  golf: 3,
+  echo: 4,
   bravo: 5,
   charlie: 6,
   alpha: 7,
@@ -24,18 +25,36 @@ const SOURCE_PRIORITY: Record<string, number> = {
   intel: 10,
 };
 
-// Alternative embed providers
-const EMBED_PROVIDERS: Record<string, string> = {
-  // Provider 1: embedsports.top (from streamed.pk - primary)
-  embedsports: "https://embedsports.top/embed/{source}/{id}/{no}",
-  // Provider 2: streamed.watch (same ecosystem)
-  streamedwatch: "https://streamed.watch/embed/{source}/{id}/{no}",
-};
+// Multiple embed provider templates
+const EMBED_PROVIDERS: { id: string; name: string; template: string }[] = [
+  {
+    id: "embedsports",
+    name: "EmbedSports",
+    template: "https://embedsports.top/embed/{source}/{id}/{no}",
+  },
+  {
+    id: "streamedwatch",
+    name: "StreamedWatch",
+    template: "https://streamed.watch/embed/{source}/{id}/{no}",
+  },
+  {
+    id: "streambtw",
+    name: "StreamBTW",
+    template: "https://streambtw.com/embed/{source}/{id}/{no}",
+  },
+];
 
 function makeTimeout(): AbortController {
   const ctrl = new AbortController();
   setTimeout(() => ctrl.abort(), TIMEOUT);
   return ctrl;
+}
+
+function buildEmbedUrl(template: string, source: string, id: string, no: number): string {
+  return template
+    .replace("{source}", source)
+    .replace("{id}", id)
+    .replace("{no}", String(no));
 }
 
 export async function GET(req: Request) {
@@ -58,7 +77,7 @@ export async function GET(req: Request) {
     }
   }
 
-  // If no sources parsed, try fetching match data
+  // If no sources parsed, try fetching match data from API
   if (parsedSources.length === 0 && matchId) {
     try {
       const ctrl = makeTimeout();
@@ -92,7 +111,8 @@ export async function GET(req: Request) {
     return pa - pb;
   });
 
-  // Fetch streams from ALL sources in parallel (fast)
+  // ── APPROACH 1: Fetch stream URLs from streamed.pk API (fast, returns embed URLs) ──
+  const apiStreams: any[] = [];
   const streamResults = await Promise.allSettled(
     parsedSources.map(async (src) => {
       try {
@@ -123,34 +143,33 @@ export async function GET(req: Request) {
     })
   );
 
-  // Merge all streams from API
-  const apiStreams: any[] = [];
   for (const result of streamResults) {
     if (result.status === "fulfilled" && Array.isArray(result.value)) {
       apiStreams.push(...result.value);
     }
   }
 
-  // Also construct alternative embed URLs for each source (backup providers)
+  // ── APPROACH 2: Construct embed URLs from multiple providers as backup ──
   const backupStreams: any[] = [];
   for (const src of parsedSources) {
-    // Generate backup embed URLs using alternative providers
-    backupStreams.push({
-      id: `${src.source}-1-alt`,
-      streamNo: 1,
-      language: "English",
-      hd: true,
-      embedUrl: EMBED_PROVIDERS.streamedwatch
-        .replace("{source}", src.source)
-        .replace("{id}", src.id)
-        .replace("{no}", "1"),
-      source: src.source,
-      viewers: 0,
-      provider: "streamedwatch",
-    });
+    for (const provider of EMBED_PROVIDERS) {
+      // Skip embedsports provider for backups since it's already in apiStreams
+      if (provider.id === "embedsports") continue;
+
+      backupStreams.push({
+        id: `${src.source}-1-${provider.id}`,
+        streamNo: 1,
+        language: "English",
+        hd: true,
+        embedUrl: buildEmbedUrl(provider.template, src.source, src.id, 1),
+        source: src.source,
+        viewers: 0,
+        provider: provider.id,
+      });
+    }
   }
 
-  // Combine: API streams first, then backup streams
+  // Combine: API streams first (they're verified), then backup streams
   const allStreams = [...apiStreams, ...backupStreams];
 
   // Deduplicate by embedUrl, sort by priority
