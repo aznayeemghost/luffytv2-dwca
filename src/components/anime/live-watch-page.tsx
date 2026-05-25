@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAppStore } from "./store";
+import Hls from "hls.js";
 
 // ============================================================
-// LIVE WATCH PAGE — Zero Proxy, Direct Iframe, Multiple Providers
-// Approach: Try direct iframe embeds. If blocked, open in new tab.
-// No server-side M3U8 extraction, no CORS proxy. Just iframe.
+// LIVE WATCH PAGE — hls.js Native Player (NO IFRAME)
+// Primary: Extract M3U8 → play with hls.js → proxy through Edge if CORS blocked
+// Fallback: Open embed URL in new tab (always works)
 // ============================================================
 
 interface StreamInfo {
@@ -18,22 +19,6 @@ interface StreamInfo {
   source: string;
   viewers?: number;
   provider?: string;
-}
-
-interface MatchData {
-  id: string;
-  title: string;
-  sport: string;
-  sportName: string;
-  date: number;
-  poster: string;
-  popular: boolean;
-  homeTeam: string;
-  awayTeam: string;
-  homeBadge: string;
-  awayBadge: string;
-  sources: { source: string; id: string }[];
-  isLive: boolean;
 }
 
 interface LiveWatchProps {
@@ -86,7 +71,7 @@ function formatMatchTime(timestamp: number): string {
   return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) + `, ${time}`;
 }
 
-// ── BIG COUNTDOWN TIMER ──
+// ── COUNTDOWN TIMER ──
 function CountdownTimer({ targetDate, sportColor }: { targetDate: number; sportColor: string }) {
   const [timeLeft, setTimeLeft] = useState({ d: 0, h: 0, m: 0, s: 0, total: 0 });
 
@@ -117,45 +102,36 @@ function CountdownTimer({ targetDate, sportColor }: { targetDate: number; sportC
           <span className="relative inline-flex rounded-full h-4 w-4 bg-red-500" />
         </span>
         <span className="text-xl font-black text-red-400 animate-pulse">MATCH STARTING!</span>
-        <span className="text-xs text-white/25">The stream should be available now</span>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col items-center gap-4">
-      <span className="text-[11px] text-white/30 uppercase tracking-[0.2em] font-bold">Kickoff Countdown</span>
+    <div className="flex flex-col items-center gap-3">
+      <span className="text-[10px] text-white/25 uppercase tracking-[0.2em] font-bold">Kickoff In</span>
       <div className="flex items-center gap-2">
         {timeLeft.d > 0 && (
           <>
             <div className="flex flex-col items-center gap-1">
-              <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-black" style={{ background: `${sportColor}20`, color: sportColor }}>
-                {timeLeft.d}
-              </div>
-              <span className="text-[9px] text-white/20 uppercase tracking-wider">days</span>
+              <div className="w-14 h-14 rounded-lg flex items-center justify-center text-xl font-black" style={{ background: `${sportColor}20`, color: sportColor }}>{timeLeft.d}</div>
+              <span className="text-[8px] text-white/20 uppercase">days</span>
             </div>
-            <span className="text-2xl font-black text-white/10 -mt-4">:</span>
+            <span className="text-xl font-black text-white/10 -mt-3">:</span>
           </>
         )}
         <div className="flex flex-col items-center gap-1">
-          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-black" style={{ background: `${sportColor}20`, color: sportColor }}>
-            {pad(timeLeft.h)}
-          </div>
-          <span className="text-[9px] text-white/20 uppercase tracking-wider">hrs</span>
+          <div className="w-14 h-14 rounded-lg flex items-center justify-center text-xl font-black" style={{ background: `${sportColor}20`, color: sportColor }}>{pad(timeLeft.h)}</div>
+          <span className="text-[8px] text-white/20 uppercase">hrs</span>
         </div>
-        <span className="text-2xl font-black text-white/10 -mt-4">:</span>
+        <span className="text-xl font-black text-white/10 -mt-3">:</span>
         <div className="flex flex-col items-center gap-1">
-          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-black" style={{ background: `${sportColor}20`, color: sportColor }}>
-            {pad(timeLeft.m)}
-          </div>
-          <span className="text-[9px] text-white/20 uppercase tracking-wider">min</span>
+          <div className="w-14 h-14 rounded-lg flex items-center justify-center text-xl font-black" style={{ background: `${sportColor}20`, color: sportColor }}>{pad(timeLeft.m)}</div>
+          <span className="text-[8px] text-white/20 uppercase">min</span>
         </div>
-        <span className="text-2xl font-black text-white/10 -mt-4">:</span>
+        <span className="text-xl font-black text-white/10 -mt-3">:</span>
         <div className="flex flex-col items-center gap-1">
-          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-black" style={{ background: `${sportColor}20`, color: sportColor }}>
-            {pad(timeLeft.s)}
-          </div>
-          <span className="text-[9px] text-white/20 uppercase tracking-wider">sec</span>
+          <div className="w-14 h-14 rounded-lg flex items-center justify-center text-xl font-black" style={{ background: `${sportColor}20`, color: sportColor }}>{pad(timeLeft.s)}</div>
+          <span className="text-[8px] text-white/20 uppercase">sec</span>
         </div>
       </div>
     </div>
@@ -164,84 +140,52 @@ function CountdownTimer({ targetDate, sportColor }: { targetDate: number; sportC
 
 export default function LiveWatchPage(props: LiveWatchProps) {
   const navigate = useAppStore(s => s.navigate);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
+  const playerContainerRef = useRef<HTMLDivElement>(null);
+
   const [streams, setStreams] = useState<StreamInfo[]>([]);
   const [activeStream, setActiveStream] = useState<StreamInfo | null>(null);
   const [loadingStreams, setLoadingStreams] = useState(true);
-  const [iframeKey, setIframeKey] = useState(0);
-  const [iframeLoaded, setIframeLoaded] = useState(false);
-  const [iframeError, setIframeError] = useState(false);
+  const [playerState, setPlayerState] = useState<"loading" | "playing" | "error" | "countdown" | "no-stream">("loading");
+  const [playerError, setPlayerError] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [matchData, setMatchData] = useState<MatchData | null>(null);
-  const [loadingMatch, setLoadingMatch] = useState(false);
-  const [showControls, setShowControls] = useState(true);
-  const playerContainerRef = useRef<HTMLDivElement>(null);
-  const controlsTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [m3u8Url, setM3u8Url] = useState("");
+  const [useProxy, setUseProxy] = useState(true);
+  const [matchData, setMatchData] = useState<any>(null);
 
-  const hasFullData = props.matchTitle && props.matchSources && props.matchSources !== "[]";
+  const sportIcon = sportIcons[props.matchSport || "other"] || "📺";
+  const sportColor = sportColors[props.matchSport || "other"] || "#6b7280";
+  const isUpcoming = props.matchDate ? props.matchDate > Date.now() : false;
+  const matchTime = props.matchDate ? formatMatchTime(props.matchDate) : "";
 
   // Build match data from props
   useEffect(() => {
-    if (hasFullData) {
-      const sources = (() => { try { return JSON.parse(props.matchSources || "[]"); } catch { return []; } })();
-      setMatchData({
-        id: props.matchId,
-        title: props.matchTitle,
-        sport: props.matchSport,
-        sportName: props.matchSportName || sportNames[props.matchSport] || props.matchSport,
-        date: props.matchDate,
-        poster: props.matchPoster,
-        popular: props.matchPopular,
-        homeTeam: props.matchHomeTeam,
-        awayTeam: props.matchAwayTeam,
-        homeBadge: props.matchHomeBadge,
-        awayBadge: props.matchAwayBadge,
-        sources,
-        isLive: true,
-        sportsrcCategory: props.matchSportsrcCategory || props.matchSport,
-        sportsrcId: props.matchSportsrcId || props.matchId,
-      } as any);
-      return;
-    }
+    const sources = (() => { try { return JSON.parse(props.matchSources || "[]"); } catch { return []; } })();
+    setMatchData({
+      id: props.matchId,
+      title: props.matchTitle,
+      sport: props.matchSport,
+      sportName: props.matchSportName || sportNames[props.matchSport] || props.matchSport,
+      date: props.matchDate,
+      homeTeam: props.matchHomeTeam,
+      awayTeam: props.matchAwayTeam,
+      homeBadge: props.matchHomeBadge,
+      awayBadge: props.matchAwayBadge,
+      sources,
+    });
+  }, [props.matchId]);
 
-    if (!props.matchId) return;
-    setLoadingMatch(true);
-
-    const fetchMatchData = async () => {
-      try {
-        const res = await fetch("/api/live");
-        if (res.ok) {
-          const data = await res.json();
-          const match = (data.matches || []).find((m: any) => m.id === props.matchId);
-          if (match) { setMatchData(match); setLoadingMatch(false); return; }
-        }
-        setMatchData({
-          id: props.matchId, title: props.matchId.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
-          sport: props.matchSport || "other", sportName: props.matchSportName || "Sports",
-          date: props.matchDate || 0, poster: "", popular: false,
-          homeTeam: "", awayTeam: "", homeBadge: "", awayBadge: "", sources: [], isLive: false,
-        });
-      } catch {
-        setMatchData({
-          id: props.matchId, title: props.matchId.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
-          sport: props.matchSport || "other", sportName: "Sports", date: 0, poster: "", popular: false,
-          homeTeam: "", awayTeam: "", homeBadge: "", awayBadge: "", sources: [], isLive: false,
-        });
-      }
-      setLoadingMatch(false);
-    };
-    fetchMatchData();
-  }, [props.matchId, hasFullData]);
-
-  // Fetch streams — FAST, just resolve embed URLs
+  // Fetch stream servers from embed API
   useEffect(() => {
-    if (!matchData) return;
+    if (!props.matchId) return;
     const fetchStreams = async () => {
       setLoadingStreams(true);
       try {
-        const sourcesParam = JSON.stringify(matchData.sources || []);
-        const cat = (matchData as any).sportsrcCategory || props.matchSportsrcCategory || matchData.sport || "";
-        const srcId = (matchData as any).sportsrcId || props.matchSportsrcId || matchData.id || "";
-        const res = await fetch(`/api/live/embed?matchId=${encodeURIComponent(matchData.id)}&sources=${encodeURIComponent(sourcesParam)}&sportsrcCategory=${encodeURIComponent(cat)}&sportsrcId=${encodeURIComponent(srcId)}`);
+        const sourcesParam = props.matchSources || "[]";
+        const cat = props.matchSportsrcCategory || props.matchSport || "";
+        const srcId = props.matchSportsrcId || props.matchId || "";
+        const res = await fetch(`/api/live/embed?matchId=${encodeURIComponent(props.matchId)}&sources=${encodeURIComponent(sourcesParam)}&sportsrcCategory=${encodeURIComponent(cat)}&sportsrcId=${encodeURIComponent(srcId)}`);
         if (res.ok) {
           const data = await res.json();
           if (data.streams?.length > 0) {
@@ -255,26 +199,106 @@ export default function LiveWatchPage(props: LiveWatchProps) {
       setLoadingStreams(false);
     };
     fetchStreams();
-  }, [matchData?.id, matchData?.sources?.length]);
+  }, [props.matchId, props.matchSources]);
 
-  // Reset iframe state on stream change
+  // When activeStream changes, try to extract M3U8 and play with hls.js
   useEffect(() => {
-    setIframeLoaded(false);
-    setIframeError(false);
-  }, [activeStream, iframeKey]);
+    if (!activeStream?.embedUrl) {
+      if (isUpcoming) setPlayerState("countdown");
+      else setPlayerState("no-stream");
+      return;
+    }
 
-  // Auto-hide controls after 3s of no mouse movement
-  const handleMouseMove = useCallback(() => {
-    setShowControls(true);
-    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-    controlsTimerRef.current = setTimeout(() => {
-      if (iframeLoaded) setShowControls(false);
-    }, 3000);
-  }, [iframeLoaded]);
+    const tryPlayStream = async () => {
+      setPlayerState("loading");
+      setPlayerError("");
+
+      // Step 1: Extract M3U8 URL from embed page
+      try {
+        const res = await fetch(`/api/live/m3u8?embedUrl=${encodeURIComponent(activeStream.embedUrl)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.m3u8Url) {
+            setM3u8Url(data.m3u8Url);
+            playWithHls(data.m3u8Url, true); // try with proxy first
+            return;
+          }
+        }
+      } catch {}
+
+      // M3U8 extraction failed — try direct embed (might work for some providers)
+      // If that fails, user can open in new tab
+      setPlayerState("error");
+      setPlayerError("Could not extract video stream. Click 'Watch in New Tab' below.");
+    };
+
+    tryPlayStream();
+
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [activeStream]);
+
+  // Play M3U8 with hls.js
+  const playWithHls = useCallback((url: string, proxy: boolean) => {
+    if (!videoRef.current) return;
+
+    // Destroy previous instance
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    // Route through edge proxy if CORS is an issue
+    const finalUrl = proxy
+      ? `/api/live/proxy/${url.replace("https://", "https://").replace("http://", "http://")}`
+      : url;
+
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        xhrSetup: (xhr, url) => {
+          xhr.setRequestHeader("Referer", "https://embedsports.top/");
+        },
+      });
+      hlsRef.current = hls;
+
+      hls.loadSource(finalUrl);
+      hls.attachMedia(videoRef.current);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        videoRef.current?.play().catch(() => {});
+        setPlayerState("playing");
+      });
+
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          if (proxy && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            // Proxy failed, try without proxy (direct M3U8)
+            playWithHls(url, false);
+            return;
+          }
+          setPlayerState("error");
+          setPlayerError("Stream failed to load. Try a different server or open in new tab.");
+        }
+      });
+    } else if (videoRef.current.canPlayType("application/vnd.apple.mpegurl")) {
+      // Safari native HLS
+      videoRef.current.src = finalUrl;
+      videoRef.current.addEventListener("loadedmetadata", () => {
+        videoRef.current?.play().catch(() => {});
+        setPlayerState("playing");
+      });
+    }
+  }, []);
 
   const switchStream = (stream: StreamInfo) => {
     setActiveStream(stream);
-    setIframeKey(prev => prev + 1);
+    setM3u8Url("");
   };
 
   const toggleFullscreen = async () => {
@@ -294,26 +318,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
     return () => document.removeEventListener("fullscreenchange", handler);
   }, []);
 
-  // Iframe load timeout — if iframe doesn't load in 15s, show error
-  useEffect(() => {
-    if (!activeStream?.embedUrl || iframeLoaded || iframeError) return;
-    const timer = setTimeout(() => {
-      if (!iframeLoaded) {
-        setIframeError(true);
-      }
-    }, 15000);
-    return () => clearTimeout(timer);
-  }, [activeStream, iframeKey, iframeLoaded, iframeError]);
-
-  // Derived
-  const m = matchData;
-  const sportIcon = sportIcons[m?.sport || "other"] || "📺";
-  const sportColor = sportColors[m?.sport || "other"] || "#6b7280";
-  const hasTeams = m?.homeTeam || m?.awayTeam;
-  const matchTime = m?.date ? formatMatchTime(m.date) : "";
-  const isLive = m?.isLive || (m?.date ? m.date <= Date.now() && m.date > Date.now() - 10800000 : false);
-  const isUpcoming = m?.date ? m.date > Date.now() : false;
-  const embedUrl = activeStream?.embedUrl || "";
+  const hasTeams = props.matchHomeTeam || props.matchAwayTeam;
 
   return (
     <div className="min-h-screen flex flex-col -mx-4 lg:-mx-8 -mt-[75px] pt-0">
@@ -322,260 +327,160 @@ export default function LiveWatchPage(props: LiveWatchProps) {
         ref={playerContainerRef}
         className="relative w-full bg-black"
         style={{ aspectRatio: isFullscreen ? "auto" : "16/9", minHeight: isFullscreen ? "100vh" : "280px" }}
-        onMouseMove={handleMouseMove}
       >
-        {/* Loading state */}
-        {(loadingStreams || loadingMatch) && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black z-30">
+        {/* Hidden video element for hls.js */}
+        <video
+          ref={videoRef}
+          className="absolute inset-0 w-full h-full"
+          style={{ zIndex: playerState === "playing" ? 10 : 0 }}
+          playsInline
+          controls
+        />
+
+        {/* Loading overlay */}
+        {playerState === "loading" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black z-20">
             <div className="w-14 h-14 rounded-full border-2 border-[#7c6cf0]/30 border-t-[#7c6cf0] animate-spin" />
-            <p className="text-sm text-white/40">{loadingMatch ? "Loading match..." : "Finding streams..."}</p>
+            <p className="text-sm text-white/40">Extracting stream...</p>
+            <p className="text-[10px] text-white/20">Getting M3U8 from embed page</p>
           </div>
         )}
 
-        {/* No stream + upcoming = countdown */}
-        {!loadingStreams && !loadingMatch && !embedUrl && isUpcoming && m?.date && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-gradient-to-br from-black via-[#0a0a0f] to-black z-30">
+        {/* Countdown for upcoming */}
+        {playerState === "countdown" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-gradient-to-br from-black via-[#0a0a0f] to-black z-20">
             <div className="absolute inset-0 opacity-30" style={{ background: `radial-gradient(circle at 50% 40%, ${sportColor}15, transparent 60%)` }} />
             <div className="relative z-10 flex flex-col items-center gap-6">
-              {/* Sport icon */}
               <div className="w-24 h-24 rounded-2xl flex items-center justify-center" style={{ background: `${sportColor}10`, boxShadow: `0 0 40px ${sportColor}10` }}>
                 <span className="text-5xl">{sportIcon}</span>
               </div>
-
-              {/* Match title */}
-              <div className="text-center">
-                <h2 className="text-xl font-bold text-white/80 mb-1" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>{m?.title}</h2>
-                <p className="text-sm text-white/25">{sportIcon} {m?.sportName}</p>
-              </div>
-
-              {/* COUNTDOWN */}
-              <CountdownTimer targetDate={m.date} sportColor={sportColor} />
-
-              {/* Schedule info */}
+              <h2 className="text-xl font-bold text-white/80">{props.matchTitle}</h2>
+              <CountdownTimer targetDate={props.matchDate} sportColor={sportColor} />
               <p className="text-xs text-white/20">{matchTime}</p>
-              <p className="text-[10px] text-white/15 max-w-xs text-center">Stream will auto-load when the match starts. You can also browse other live matches.</p>
-
-              <button
-                onClick={() => navigate({ page: "live" } as any)}
-                className="px-5 py-2.5 rounded-xl bg-white/[0.06] text-white/40 text-[11px] font-bold uppercase tracking-wider hover:bg-white/[0.08] hover:text-white/60 transition-all"
-              >
-                Browse Live Matches
-              </button>
             </div>
           </div>
         )}
 
-        {/* No stream + not upcoming */}
-        {!loadingStreams && !loadingMatch && !embedUrl && !isUpcoming && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black z-30">
+        {/* Error / no stream */}
+        {playerState === "error" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-black z-20">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-amber-500/10">
+              <svg className="w-8 h-8 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <p className="text-sm text-white/50">Stream could not load inline</p>
+            <p className="text-[10px] text-white/20 max-w-xs text-center">{playerError || "Try opening in a new tab — this always works!"}</p>
+            {activeStream?.embedUrl && (
+              <a
+                href={activeStream.embedUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 px-6 py-3 rounded-xl bg-emerald-500/15 text-emerald-400 text-sm font-bold hover:bg-emerald-500/25 border border-emerald-500/20 transition-all flex items-center gap-2"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                Watch in New Tab
+              </a>
+            )}
+          </div>
+        )}
+
+        {/* No stream available */}
+        {playerState === "no-stream" && !isUpcoming && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black z-20">
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-white/5">
               <span className="text-3xl">{sportIcon}</span>
             </div>
-            <p className="text-sm text-white/40">No streams available for this match</p>
+            <p className="text-sm text-white/40">No streams available</p>
             <button onClick={() => navigate({ page: "live" } as any)} className="px-4 py-2 rounded-xl bg-white/[0.06] text-white/40 text-[11px] font-bold hover:bg-white/[0.08] transition-all">Browse Matches</button>
           </div>
         )}
 
-        {/* Iframe loading overlay */}
-        {embedUrl && !iframeLoaded && !iframeError && (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-black">
-            <div className="w-14 h-14 rounded-full border-2 border-[#7c6cf0]/30 border-t-[#7c6cf0] animate-spin" />
-            <p className="text-sm text-white/40">Loading player...</p>
-            <p className="text-[10px] text-white/20">If this takes too long, try another server below</p>
-          </div>
-        )}
-
-        {/* Iframe error / timeout — show fallback options */}
-        {iframeError && embedUrl && (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-black/90">
-            <div className="w-14 h-14 rounded-2xl flex items-center justify-center bg-amber-500/10">
-              <svg className="w-7 h-7 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-                <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-            </div>
-            <p className="text-sm text-white/50">Player taking too long</p>
-            <p className="text-[10px] text-white/20 max-w-xs text-center">Try opening the stream in a new tab, or switch to a different server below.</p>
-            <div className="flex gap-3 mt-2">
-              <a
-                href={embedUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-5 py-2.5 rounded-xl bg-emerald-500/15 text-emerald-400 text-[12px] font-bold hover:bg-emerald-500/25 border border-emerald-500/20 transition-all"
-              >
-                Open in New Tab
-              </a>
-              <button
-                onClick={() => { setIframeError(false); setIframeKey(prev => prev + 1); }}
-                className="px-5 py-2.5 rounded-xl bg-white/[0.06] text-white/50 text-[12px] font-bold hover:bg-white/[0.08] transition-all"
-              >
-                Retry
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── DIRECT IFRAME ── */}
-        {embedUrl && (
-          <iframe
-            key={iframeKey}
-            src={embedUrl}
-            className="absolute inset-0 w-full h-full"
-            allowFullScreen
-            allow="autoplay; encrypted-media; fullscreen; picture-in-picture; clipboard-write"
-            referrerPolicy="no-referrer-when-downgrade"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation allow-downloads"
-            style={{ border: "none", zIndex: iframeLoaded && !iframeError ? 10 : 0 }}
-            onLoad={() => setIframeLoaded(true)}
-            onError={() => setIframeError(true)}
-          />
-        )}
-
-        {/* ── OVERLAY CONTROLS (show on hover/mousemove) ── */}
-        {iframeLoaded && embedUrl && showControls && (
-          <div
-            className="absolute inset-0 z-30 pointer-events-none"
-            style={{ transition: "opacity 0.3s" }}
-          >
-            {/* Top gradient */}
-            <div className="absolute top-0 left-0 right-0 h-20 bg-gradient-to-b from-black/60 to-transparent pointer-events-auto" />
-
-            {/* Top left: back + title */}
-            <div className="absolute top-3 left-4 flex items-center gap-3 pointer-events-auto">
-              <button
-                onClick={() => navigate({ page: "live" } as any)}
-                className="p-2 rounded-lg bg-black/40 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/60 transition-all"
-              >
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M15 19l-7-7 7-7" /></svg>
-              </button>
-              <div>
-                <p className="text-white text-sm font-bold leading-tight">{m?.title || "Live Match"}</p>
-                <div className="flex items-center gap-2">
-                  <p className="text-white/40 text-[10px]">{sportIcon} {m?.sportName}</p>
-                  {isLive && (
-                    <span className="inline-flex items-center gap-1 text-[9px] text-red-400 font-bold">
-                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> LIVE
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Top right: open in tab + fullscreen */}
-            <div className="absolute top-3 right-4 flex items-center gap-2 pointer-events-auto">
-              <a href={embedUrl} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg bg-black/40 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/60 transition-all" title="Open in new tab">
+        {/* Player controls overlay */}
+        {playerState === "playing" && (
+          <div className="absolute top-3 right-3 z-30 flex items-center gap-2">
+            {activeStream?.embedUrl && (
+              <a href={activeStream.embedUrl} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg bg-black/40 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/60 transition-all" title="Open in new tab">
                 <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3" /></svg>
               </a>
-              <button onClick={toggleFullscreen} className="p-2 rounded-lg bg-black/40 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/60 transition-all">
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  {isFullscreen ? <path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3" /> : <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3" />}
-                </svg>
-              </button>
-            </div>
-
-            {/* Bottom gradient */}
-            <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-black/60 to-transparent" />
+            )}
+            <button onClick={toggleFullscreen} className="p-2 rounded-lg bg-black/40 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/60 transition-all">
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                {isFullscreen ? <path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3" /> : <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3" />}
+              </svg>
+            </button>
           </div>
         )}
       </div>
 
-      {/* ── BELOW PLAYER: Match Info + Servers ── */}
+      {/* ── BELOW PLAYER ── */}
       <div className="px-4 lg:px-8 py-6 flex flex-col lg:flex-row gap-6">
-        {/* Left column */}
         <div className="flex-1 min-w-0">
-          {/* Back button */}
-          <button
-            onClick={() => navigate({ page: "live" } as any)}
-            className="flex items-center gap-2 text-white/40 hover:text-white transition-colors mb-5"
-          >
+          {/* Back */}
+          <button onClick={() => navigate({ page: "live" } as any)} className="flex items-center gap-2 text-white/40 hover:text-white transition-colors mb-5">
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M15 19l-7-7 7-7" /></svg>
             <span className="text-[11px] font-bold uppercase tracking-wider" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>Back to Live</span>
           </button>
 
-          {/* Match header */}
-          {m && (
-            <div className="bg-white/[0.02] border border-white/[0.06] rounded-2xl overflow-hidden mb-6">
-              {/* Color bar */}
-              <div className="h-1" style={{ background: `linear-gradient(90deg, ${sportColor}, ${sportColor}50, transparent)` }} />
-
-              <div className="p-5">
-                {/* Title + badges */}
-                <div className="flex items-start justify-between gap-4 mb-4">
-                  <div>
-                    <h2 className="text-lg font-bold text-white mb-1.5" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>
-                      {m.title}
-                    </h2>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>
-                        {sportIcon} {m.sportName || m.sport}
+          {/* Match info card */}
+          <div className="bg-white/[0.02] border border-white/[0.06] rounded-2xl overflow-hidden mb-6">
+            <div className="h-1" style={{ background: `linear-gradient(90deg, ${sportColor}, ${sportColor}50, transparent)` }} />
+            <div className="p-5">
+              <div className="flex items-start justify-between gap-4 mb-4">
+                <div>
+                  <h2 className="text-lg font-bold text-white mb-1.5" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>{props.matchTitle}</h2>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>{sportIcon} {props.matchSportName || props.matchSport}</span>
+                    {isUpcoming ? (
+                      <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px] font-bold">UPCOMING</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 text-[10px] font-bold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> LIVE
                       </span>
-                      {isLive ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 text-[10px] font-bold">
-                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> LIVE NOW
-                        </span>
-                      ) : isUpcoming ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px] font-bold">UPCOMING</span>
-                      ) : null}
-                      {m.popular && <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400">POPULAR</span>}
-                    </div>
+                    )}
                   </div>
-                  {matchTime && <p className="text-xs text-white/40 flex-shrink-0">{matchTime}</p>}
                 </div>
+                {matchTime && <p className="text-xs text-white/40 flex-shrink-0">{matchTime}</p>}
+              </div>
 
-                {/* Countdown for upcoming */}
-                {isUpcoming && m.date > 0 && (
-                  <div className="mb-5 p-5 rounded-xl flex justify-center" style={{ background: `${sportColor}08`, border: `1px solid ${sportColor}15` }}>
-                    <CountdownTimer targetDate={m.date} sportColor={sportColor} />
-                  </div>
-                )}
+              {isUpcoming && props.matchDate > 0 && (
+                <div className="mb-5 p-5 rounded-xl flex justify-center" style={{ background: `${sportColor}08`, border: `1px solid ${sportColor}15` }}>
+                  <CountdownTimer targetDate={props.matchDate} sportColor={sportColor} />
+                </div>
+              )}
 
-                {/* Teams with badges */}
-                {hasTeams && (
-                  <div className="bg-white/[0.02] border border-white/[0.04] rounded-xl p-5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
-                        {m.homeBadge ? (
-                          <img src={m.homeBadge} alt={m.homeTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                        ) : (
-                          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>
-                            {m.homeTeam?.charAt(0) || "H"}
-                          </div>
-                        )}
-                        <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{m.homeTeam || "Home"}</span>
-                      </div>
-                      <div className="px-6 flex flex-col items-center gap-1">
-                        {isLive ? (
-                          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-red-400">
-                            <span className="relative flex h-2 w-2">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
-                            </span>
-                            LIVE
-                          </span>
-                        ) : (
-                          <span className="text-lg font-black text-white/15 tracking-widest">VS</span>
-                        )}
-                      </div>
-                      <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
-                        {m.awayBadge ? (
-                          <img src={m.awayBadge} alt={m.awayTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                        ) : (
-                          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>
-                            {m.awayTeam?.charAt(0) || "A"}
-                          </div>
-                        )}
-                        <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{m.awayTeam || "Away"}</span>
-                      </div>
+              {hasTeams && (
+                <div className="bg-white/[0.02] border border-white/[0.04] rounded-xl p-5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
+                      {props.matchHomeBadge ? (
+                        <img src={props.matchHomeBadge} alt={props.matchHomeTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                      ) : (
+                        <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{props.matchHomeTeam?.charAt(0) || "H"}</div>
+                      )}
+                      <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{props.matchHomeTeam || "Home"}</span>
+                    </div>
+                    <div className="px-6">
+                      <span className="text-lg font-black text-white/15 tracking-widest">VS</span>
+                    </div>
+                    <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
+                      {props.matchAwayBadge ? (
+                        <img src={props.matchAwayBadge} alt={props.matchAwayTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                      ) : (
+                        <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{props.matchAwayTeam?.charAt(0) || "A"}</div>
+                      )}
+                      <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{props.matchAwayTeam || "Away"}</span>
                     </div>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
-          )}
+          </div>
 
-          {/* ── SERVER SELECTION ── */}
+          {/* ── SERVERS ── */}
           <div className="mb-6">
             <h3 className="text-[11px] font-bold text-white/25 uppercase tracking-wider mb-3" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>
-              Stream Servers {streams.length > 0 && `(${streams.length} available)`}
+              Stream Servers {streams.length > 0 && `(${streams.length})`}
             </h3>
 
             {streams.length > 0 ? (
@@ -587,66 +492,54 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                       key={`${stream.id}-${stream.streamNo}-${idx}`}
                       onClick={() => switchStream(stream)}
                       className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-[11px] font-bold transition-all ${
-                        isActive
-                          ? "bg-[#7c6cf0] text-white shadow-[0_0_16px_rgba(124,108,240,0.3)]"
-                          : "bg-white/[0.04] text-white/50 hover:text-white/70 hover:bg-white/[0.06] border border-white/[0.06]"
+                        isActive ? "bg-[#7c6cf0] text-white shadow-[0_0_16px_rgba(124,108,240,0.3)]" : "bg-white/[0.04] text-white/50 hover:text-white/70 hover:bg-white/[0.06] border border-white/[0.06]"
                       }`}
                     >
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="3" /><path d="M2 12h4m12 0h4M12 2v4m0 12v4" /></svg>
-                        <span className="truncate">{stream.source?.charAt(0).toUpperCase()}{stream.source?.slice(1)} {stream.streamNo}</span>
-                      </div>
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        {stream.hd && <span className="text-[7px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 font-black">HD</span>}
-                      </div>
+                      <span className="truncate">{stream.source?.charAt(0).toUpperCase()}{stream.source?.slice(1)} {stream.streamNo}</span>
+                      {stream.hd && <span className="text-[7px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 font-black">HD</span>}
                     </button>
                   );
                 })}
               </div>
             ) : !loadingStreams ? (
               <div className="text-center py-6 bg-white/[0.02] rounded-xl border border-white/[0.04]">
-                <p className="text-xs text-white/25">No stream servers found</p>
-                <p className="text-[10px] text-white/15 mt-1">The match may not have started yet</p>
+                <p className="text-xs text-white/25">No servers found</p>
               </div>
-            ) : null}
+            ) : (
+              <div className="flex items-center gap-2 px-3 py-2">
+                <div className="w-4 h-4 rounded-full border border-[#7c6cf0]/30 border-t-[#7c6cf0] animate-spin" />
+                <span className="text-[10px] text-white/30">Finding servers...</span>
+              </div>
+            )}
 
             {/* Action buttons */}
             <div className="flex flex-wrap gap-2 mt-3">
-              {loadingStreams && (
-                <div className="flex items-center gap-2 px-3 py-2">
-                  <div className="w-4 h-4 rounded-full border border-[#7c6cf0]/30 border-t-[#7c6cf0] animate-spin" />
-                  <span className="text-[10px] text-white/30">Resolving servers...</span>
-                </div>
-              )}
-              <button
-                onClick={() => setIframeKey(prev => prev + 1)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-bold bg-white/[0.04] text-white/30 hover:text-white/50 hover:bg-white/[0.06] border border-white/[0.06] transition-all"
-              >
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16" /></svg>
-                Reload
-              </button>
-              {embedUrl && (
+              {activeStream?.embedUrl && (
                 <a
-                  href={embedUrl}
+                  href={activeStream.embedUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-bold bg-emerald-500/10 text-emerald-400/70 hover:text-emerald-400 hover:bg-emerald-500/15 border border-emerald-500/10 transition-all"
+                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[12px] font-bold bg-emerald-500/10 text-emerald-400/70 hover:text-emerald-400 hover:bg-emerald-500/15 border border-emerald-500/10 transition-all"
                 >
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3" /></svg>
-                  Open in New Tab
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3" /></svg>
+                  Watch in New Tab (Always Works)
                 </a>
               )}
+              <button onClick={() => setActiveStream(activeStream)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-bold bg-white/[0.04] text-white/30 hover:text-white/50 border border-white/[0.06] transition-all">
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16" /></svg>
+                Retry
+              </button>
             </div>
           </div>
 
           {/* Tips */}
           <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-            <h4 className="text-[11px] font-bold text-white/25 uppercase tracking-wider mb-2" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>Quick Tips</h4>
+            <h4 className="text-[11px] font-bold text-white/25 uppercase tracking-wider mb-2" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>Stream Tips</h4>
             <div className="space-y-1.5 text-[11px] text-white/20 leading-relaxed">
-              <p>If the player doesn&apos;t load, click <strong className="text-emerald-400/60">Open in New Tab</strong> — this always works</p>
-              <p>Try different servers if one is slow — some are faster than others</p>
-              <p>Use the fullscreen button for the best viewing experience</p>
-              <p>Upcoming matches will show a countdown and auto-load when ready</p>
+              <p>If the inline player doesn&apos;t load, click <strong className="text-emerald-400/60">Watch in New Tab</strong> — this always works</p>
+              <p>Try different servers — some are faster than others</p>
+              <p>The video plays natively using HLS — no iframe needed</p>
+              <p>Upcoming matches show a countdown timer</p>
             </div>
           </div>
         </div>
@@ -656,74 +549,28 @@ export default function LiveWatchPage(props: LiveWatchProps) {
           <div className="bg-white/[0.02] border border-white/[0.06] rounded-2xl overflow-hidden">
             <div className="h-[3px]" style={{ background: `linear-gradient(90deg, ${sportColor}, transparent)` }} />
             <div className="p-5">
-              {/* Sport header */}
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <span className="text-xl">{sportIcon}</span>
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>
-                    {m?.sportName || "Sports"}
-                  </span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>{props.matchSportName || "Sports"}</span>
                 </div>
-                {isLive ? (
+                {isUpcoming ? (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px] font-bold">UPCOMING</span>
+                ) : (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 text-[10px] font-bold">
                     <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> LIVE
                   </span>
-                ) : isUpcoming ? (
-                  <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px] font-bold">UPCOMING</span>
-                ) : null}
+                )}
               </div>
 
-              {/* Poster */}
-              {m?.poster && (
-                <div className="flex justify-center mb-4">
-                  <img src={m.poster} alt="" className="w-full h-40 rounded-xl object-cover bg-white/5" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                </div>
-              )}
+              <h2 className="text-lg font-bold text-white mb-4 text-center leading-snug" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>{props.matchTitle}</h2>
 
-              {/* Title */}
-              <h2 className="text-lg font-bold text-white mb-4 text-center leading-snug" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>
-                {m?.title || "Live Match"}
-              </h2>
-
-              {/* Teams mini */}
-              {hasTeams && (
-                <div className="bg-white/[0.02] border border-white/[0.04] rounded-xl p-3 mb-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex flex-col items-center gap-1.5 flex-1 min-w-0">
-                      {m!.homeBadge ? (
-                        <img src={m!.homeBadge} alt={m!.homeTeam} className="w-12 h-12 object-contain rounded-lg bg-white/5" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                      ) : (
-                        <div className="w-12 h-12 rounded-lg flex items-center justify-center text-lg font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>
-                          {m!.homeTeam?.charAt(0) || "H"}
-                        </div>
-                      )}
-                      <span className="text-[11px] text-white/70 font-medium text-center truncate w-full">{m!.homeTeam || "Home"}</span>
-                    </div>
-                    <div className="px-3">
-                      <span className="text-xs font-black text-white/20 tracking-wider">VS</span>
-                    </div>
-                    <div className="flex flex-col items-center gap-1.5 flex-1 min-w-0">
-                      {m!.awayBadge ? (
-                        <img src={m!.awayBadge} alt={m!.awayTeam} className="w-12 h-12 object-contain rounded-lg bg-white/5" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                      ) : (
-                        <div className="w-12 h-12 rounded-lg flex items-center justify-center text-lg font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>
-                          {m!.awayTeam?.charAt(0) || "A"}
-                        </div>
-                      )}
-                      <span className="text-[11px] text-white/70 font-medium text-center truncate w-full">{m!.awayTeam || "Away"}</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Sidebar countdown */}
-              {isUpcoming && m?.date && m.date > 0 && (
+              {isUpcoming && props.matchDate > 0 && (
                 <div className="mb-4 p-3 rounded-xl flex justify-center" style={{ background: `${sportColor}08`, border: `1px solid ${sportColor}12` }}>
-                  <CountdownTimer targetDate={m.date} sportColor={sportColor} />
+                  <CountdownTimer targetDate={props.matchDate} sportColor={sportColor} />
                 </div>
               )}
 
-              {/* Match details */}
               <div className="space-y-2">
                 {matchTime && (
                   <div className="flex items-center justify-between py-1.5">
@@ -733,39 +580,28 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                 )}
                 <div className="flex items-center justify-between py-1.5">
                   <span className="text-[11px] text-white/25">Status</span>
-                  <span className="text-[11px] font-medium" style={{ color: isLive ? "#ef4444" : isUpcoming ? "#f59e0b" : "#6b7280" }}>
-                    {isLive ? "Live Now" : isUpcoming ? "Upcoming" : "Ended"}
-                  </span>
+                  <span className="text-[11px] font-medium" style={{ color: isUpcoming ? "#f59e0b" : "#ef4444" }}>{isUpcoming ? "Upcoming" : "Live"}</span>
                 </div>
                 {streams.length > 0 && (
                   <div className="flex items-center justify-between py-1.5">
                     <span className="text-[11px] text-white/25">Servers</span>
-                    <span className="text-[11px] text-white/60 font-medium">{streams.length} available</span>
+                    <span className="text-[11px] text-white/60 font-medium">{streams.length}</span>
                   </div>
                 )}
-                {activeStream && (
-                  <>
-                    <div className="flex items-center justify-between py-1.5">
-                      <span className="text-[11px] text-white/25">Quality</span>
-                      <span className="text-[11px] text-white/60 font-medium">{activeStream.hd ? "HD" : "SD"}</span>
-                    </div>
-                    <div className="flex items-center justify-between py-1.5">
-                      <span className="text-[11px] text-white/25">Active Server</span>
-                      <span className="text-[11px] text-white/60 font-medium">{activeStream.source} #{activeStream.streamNo}</span>
-                    </div>
-                  </>
-                )}
+                <div className="flex items-center justify-between py-1.5">
+                  <span className="text-[11px] text-white/25">Player</span>
+                  <span className="text-[11px] text-white/60 font-medium">{playerState === "playing" ? "HLS Native" : "Connecting..."}</span>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Quick actions */}
           <div className="mt-3 grid grid-cols-2 gap-2">
             <button onClick={() => navigate({ page: "live" } as any)} className="py-2.5 rounded-xl bg-white/[0.04] border border-white/[0.06] text-[11px] font-bold text-white/40 hover:text-white/60 hover:bg-white/[0.06] transition-all">Browse More</button>
-            {embedUrl ? (
-              <a href={embedUrl} target="_blank" rel="noopener noreferrer" className="py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/15 text-[11px] font-bold text-emerald-400/60 hover:text-emerald-400 hover:bg-emerald-500/15 transition-all text-center">Watch in Tab</a>
+            {activeStream?.embedUrl ? (
+              <a href={activeStream.embedUrl} target="_blank" rel="noopener noreferrer" className="py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/15 text-[11px] font-bold text-emerald-400/60 hover:text-emerald-400 hover:bg-emerald-500/15 transition-all text-center">Watch in Tab</a>
             ) : (
-              <button onClick={() => setIframeKey(prev => prev + 1)} className="py-2.5 rounded-xl bg-white/[0.04] border border-white/[0.06] text-[11px] font-bold text-white/40 hover:text-white/60 hover:bg-white/[0.06] transition-all">Refresh</button>
+              <button onClick={() => setActiveStream(activeStream)} className="py-2.5 rounded-xl bg-white/[0.04] border border-white/[0.06] text-[11px] font-bold text-white/40 hover:text-white/60 transition-all">Refresh</button>
             )}
           </div>
         </div>
