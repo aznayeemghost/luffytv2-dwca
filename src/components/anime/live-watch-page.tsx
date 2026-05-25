@@ -164,7 +164,6 @@ export default function LiveWatchPage(props: LiveWatchProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [showPlayButton, setShowPlayButton] = useState(false); // Embed auto-plays, M3U8 needs click
-  const [iframeLoaded, setIframeLoaded] = useState(false);
 
   const sportIcon = sportIcons[props.matchSport || "other"] || "📺";
   const sportColor = sportColors[props.matchSport || "other"] || "#6b7280";
@@ -346,7 +345,6 @@ export default function LiveWatchPage(props: LiveWatchProps) {
   const switchStream = (stream: StreamInfo) => {
     setActiveStream(stream);
     setShowPlayButton(true);
-    setIframeLoaded(false);
   };
 
   // Handle play button click
@@ -399,28 +397,16 @@ export default function LiveWatchPage(props: LiveWatchProps) {
           />
         )}
 
-        {/* Iframe for embed streams — SANDBOX iframe with autoplay */}
+        {/* Iframe for embed streams — direct iframe, no sandbox blocking */}
         {isEmbedStream && activeStream?.embedUrl && playerState === "playing" && (
-          <>
-            {/* Loading spinner while iframe loads */}
-            {!iframeLoaded && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black z-14">
-                <div className="w-14 h-14 rounded-full border-2 border-[#7c6cf0]/30 border-t-[#7c6cf0] animate-spin" />
-                <p className="text-sm text-white/40">Loading embed player...</p>
-                <span className="text-[9px] px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-400">SANDBOX IFRAME</span>
-              </div>
-            )}
-            <iframe
-              src={activeStream.embedUrl}
-              className="absolute inset-0 w-full h-full border-0"
-              style={{ zIndex: 15, opacity: iframeLoaded ? 1 : 0 }}
-              sandbox="allow-scripts allow-same-origin allow-presentation allow-popups allow-forms allow-popups-to-escape-sandbox"
-              allowFullScreen
-              allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-              referrerPolicy="no-referrer"
-              onLoad={() => setIframeLoaded(true)}
-            />
-          </>
+          <iframe
+            src={activeStream.embedUrl}
+            className="absolute inset-0 w-full h-full border-0"
+            style={{ zIndex: 15 }}
+            allowFullScreen
+            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+            referrerPolicy="no-referrer"
+          />
         )}
 
         {/* Play button overlay — only for M3U8 streams, not embeds */}
