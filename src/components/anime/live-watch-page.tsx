@@ -213,9 +213,10 @@ export default function LiveWatchPage(props: LiveWatchProps) {
 
   // When activeStream changes, prepare the player
   useEffect(() => {
-    // For embed streams, show play button then auto-play
+    // For embed streams, show play button - user clicks to load iframe
     if (activeStream?.streamType === "embed") {
       setPlayerState("ready");
+      setShowPlayButton(true);
       return;
     }
 
@@ -225,116 +226,127 @@ export default function LiveWatchPage(props: LiveWatchProps) {
       return;
     }
 
-    // For M3U8 streams, auto-play directly (no play button needed for M3U8)
-    const playStream = () => {
-      setPlayerState("loading");
-      setPlayerError("");
-      setShowPlayButton(false);
+    // For M3U8 streams, show play button first, then auto-play on click
+    if (!showPlayButton) {
+      // User already clicked play, start streaming
+      startM3U8Playback();
+    }
+  }, [activeStream]);
 
-      const m3u8Url = activeStream.m3u8Url;
+  // Start M3U8 playback
+  const startM3U8Playback = useCallback(() => {
+    if (!activeStream?.m3u8Url || !videoRef.current) return;
+    const m3u8Url = activeStream.m3u8Url;
 
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
+    setPlayerState("loading");
+    setPlayerError("");
 
-      if (!videoRef.current) return;
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
 
-      if (Hls.isSupported()) {
-        const hls = new Hls({
-          enableWorker: true,
-          lowLatencyMode: true,
-          xhrSetup: (xhr, url) => {
-            if (activeStream.referer) {
-              xhr.setRequestHeader("Referer", activeStream.referer);
-            }
-          },
-        });
-        hlsRef.current = hls;
-
-        const useProxy = !activeStream.corsEnabled;
-        const finalUrl = useProxy
-          ? `/api/live/proxy/${m3u8Url}?referer=${encodeURIComponent(activeStream.referer || "")}`
-          : m3u8Url;
-
-        hls.loadSource(finalUrl);
-        hls.attachMedia(videoRef.current);
-
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          videoRef.current?.play().catch(() => {});
-          setPlayerState("playing");
-          setShowPlayButton(false);
-        });
-
-        hls.on(Hls.Events.ERROR, (_event, data) => {
-          if (data.fatal) {
-            if (useProxy && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-              console.log("Proxy failed, trying direct M3U8...");
-              hls.destroy();
-              hlsRef.current = null;
-
-              const hls2 = new Hls({
-                enableWorker: true,
-                lowLatencyMode: true,
-                xhrSetup: (xhr, url) => {
-                  if (activeStream.referer) xhr.setRequestHeader("Referer", activeStream.referer);
-                },
-              });
-              hlsRef.current = hls2;
-              hls2.loadSource(m3u8Url);
-              hls2.attachMedia(videoRef.current!);
-
-              hls2.on(Hls.Events.MANIFEST_PARSED, () => {
-                videoRef.current?.play().catch(() => {});
-                setPlayerState("playing");
-                setShowPlayButton(false);
-              });
-
-              hls2.on(Hls.Events.ERROR, (_e2, data2) => {
-                if (data2.fatal) {
-                  setPlayerState("error");
-                  setPlayerError("Stream failed to load. Try a different server.");
-                }
-              });
-              return;
-            }
-            setPlayerState("error");
-            setPlayerError("Stream failed to load. Try a different server.");
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        xhrSetup: (xhr, url) => {
+          if (activeStream.referer) {
+            xhr.setRequestHeader("Referer", activeStream.referer);
           }
-        });
-      } else if (videoRef.current.canPlayType("application/vnd.apple.mpegurl")) {
-        const useProxy = !activeStream.corsEnabled;
-        const finalUrl = useProxy
-          ? `/api/live/proxy/${m3u8Url}?referer=${encodeURIComponent(activeStream.referer || "")}`
-          : m3u8Url;
-        videoRef.current.src = finalUrl;
-        videoRef.current.addEventListener("loadedmetadata", () => {
-          videoRef.current?.play().catch(() => {});
-          setPlayerState("playing");
-          setShowPlayButton(false);
-        });
-      }
-    };
+        },
+      });
+      hlsRef.current = hls;
 
-    playStream();
+      const useProxy = !activeStream.corsEnabled;
+      const finalUrl = useProxy
+        ? `/api/live/proxy/${m3u8Url}?referer=${encodeURIComponent(activeStream.referer || "")}`
+        : m3u8Url;
 
+      hls.loadSource(finalUrl);
+      hls.attachMedia(videoRef.current);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        videoRef.current?.play().catch(() => {});
+        setPlayerState("playing");
+        setShowPlayButton(false);
+      });
+
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          if (useProxy && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            console.log("Proxy failed, trying direct M3U8...");
+            hls.destroy();
+            hlsRef.current = null;
+
+            const hls2 = new Hls({
+              enableWorker: true,
+              lowLatencyMode: true,
+              xhrSetup: (xhr, url) => {
+                if (activeStream.referer) xhr.setRequestHeader("Referer", activeStream.referer);
+              },
+            });
+            hlsRef.current = hls2;
+            hls2.loadSource(m3u8Url);
+            hls2.attachMedia(videoRef.current!);
+
+            hls2.on(Hls.Events.MANIFEST_PARSED, () => {
+              videoRef.current?.play().catch(() => {});
+              setPlayerState("playing");
+              setShowPlayButton(false);
+            });
+
+            hls2.on(Hls.Events.ERROR, (_e2, data2) => {
+              if (data2.fatal) {
+                setPlayerState("error");
+                setPlayerError("Stream failed to load. Try a different server.");
+              }
+            });
+            return;
+          }
+          setPlayerState("error");
+          setPlayerError("Stream failed to load. Try a different server.");
+        }
+      });
+    } else if (videoRef.current.canPlayType("application/vnd.apple.mpegurl")) {
+      const useProxy = !activeStream.corsEnabled;
+      const finalUrl = useProxy
+        ? `/api/live/proxy/${m3u8Url}?referer=${encodeURIComponent(activeStream.referer || "")}`
+        : m3u8Url;
+      videoRef.current.src = finalUrl;
+      videoRef.current.addEventListener("loadedmetadata", () => {
+        videoRef.current?.play().catch(() => {});
+        setPlayerState("playing");
+        setShowPlayButton(false);
+      });
+    }
+  }, [activeStream]);
+
+  // Cleanup HLS on unmount
+  useEffect(() => {
     return () => {
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
     };
-  }, [activeStream]);
+  }, []);
 
   const switchStream = (stream: StreamInfo) => {
     setActiveStream(stream);
     setShowPlayButton(true);
   };
 
-  // Handle play button click for embed streams
+  // Handle play button click
   const handlePlayClick = () => {
     setShowPlayButton(false);
-    setPlayerState("playing");
+    if (isEmbedStream) {
+      // For embed: set to playing so iframe loads
+      setPlayerState("playing");
+    } else if (activeStream?.m3u8Url) {
+      // For M3U8: start HLS playback
+      startM3U8Playback();
+    }
   };
 
   const toggleFullscreen = async () => {
@@ -378,10 +390,10 @@ export default function LiveWatchPage(props: LiveWatchProps) {
           />
         )}
 
-        {/* Iframe for embed streams (streamed.pk, embedsports.top) */}
+        {/* Iframe for embed streams — DIRECT URL, NO sandbox, NO proxy */}
         {isEmbedStream && activeStream?.embedUrl && playerState === "playing" && !showPlayButton && (
           <iframe
-            src={`/api/embed/proxy?url=${encodeURIComponent(activeStream.embedUrl)}`}
+            src={activeStream.embedUrl}
             className="absolute inset-0 w-full h-full border-0"
             style={{ zIndex: 15 }}
             allowFullScreen
@@ -390,8 +402,8 @@ export default function LiveWatchPage(props: LiveWatchProps) {
           />
         )}
 
-        {/* Play button overlay for all stream types */}
-        {showPlayButton && (playerState === "ready" || playerState === "playing") && (
+        {/* Play button overlay — always show until user clicks */}
+        {showPlayButton && activeStream && (playerState === "ready" || playerState === "loading" || playerState === "playing") && (
           <div
             className="absolute inset-0 flex items-center justify-center z-25 cursor-pointer"
             style={{ zIndex: 25 }}
