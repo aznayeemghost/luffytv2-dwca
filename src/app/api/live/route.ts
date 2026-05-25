@@ -8,7 +8,7 @@ import { NextResponse } from "next/server";
 //          sportsembed.su (embeds), embedsports.top (embeds)
 // ============================================================
 
-const TIMEOUT = 10000;
+const TIMEOUT = 6000;
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 
 function makeCtrl() { const c = new AbortController(); setTimeout(() => c.abort(), TIMEOUT); return c; }
@@ -72,28 +72,37 @@ async function fetchStreamfreeStreams(): Promise<LiveMatch[]> {
     const data = await res.json();
     if (!data || typeof data !== "object") return [];
 
+    // Handle {streams: {category: [...]}} or {category: [...]} formats
+    const root = data.streams && typeof data.streams === "object" ? data.streams : data;
     const matches: LiveMatch[] = [];
-    for (const [category, streams] of Object.entries(data)) {
+    for (const [category, streams] of Object.entries(root)) {
       if (!Array.isArray(streams)) continue;
       for (const s of streams as any[]) {
-        const sport = mapCategoryToSport(category);
+        const sport = mapCategoryToSport(s.category || category);
+        const homeTeam = s.home_team || s.team1?.name || extractTeam(s.title || s.name || "", 0);
+        const awayTeam = s.away_team || s.team2?.name || extractTeam(s.title || s.name || "", 1);
+        const homeBadge = s.home_logo || s.home_badge || s.team1?.logo || "";
+        const awayBadge = s.away_logo || s.away_badge || s.team2?.logo || "";
+        const ts = s.match_timestamp ? s.match_timestamp * 1000 :
+                   s.starts_at ? s.starts_at * 1000 :
+                   s.date ? new Date(s.date).getTime() : 0;
         matches.push({
-          id: `sf-${s.stream_key || s.key || Math.random()}`,
+          id: `sf-${s.stream_key || s.key || s.id || Math.random().toString(36).slice(2)}`,
           title: s.title || s.name || formatTitle(s.stream_key || ""),
           sport,
-          sportName: SPORT_NAMES[sport] || capitalize(category),
-          date: s.starts_at ? s.starts_at * 1000 : (s.date ? new Date(s.date).getTime() : 0),
-          poster: s.poster || s.image || "",
-          popular: s.featured || false,
-          homeTeam: s.home_team || extractTeam(s.title || s.name || "", 0),
-          awayTeam: s.away_team || extractTeam(s.title || s.name || "", 1),
-          homeBadge: s.home_logo || s.home_badge || "",
-          awayBadge: s.away_logo || s.away_badge || "",
+          sportName: SPORT_NAMES[sport] || capitalize(s.category || category),
+          date: ts,
+          poster: s.poster || s.image || s.thumbnail_url ? `https://streamfree.app${s.thumbnail_url}` : "",
+          popular: s.featured || s.popular || false,
+          homeTeam,
+          awayTeam,
+          homeBadge,
+          awayBadge,
           isLive: s.live || s.is_live || s.status === "live" || false,
           apiSource: "streamfree",
           sources: [],
-          streamKey: s.stream_key || s.key || "",
-          streamCategory: category,
+          streamKey: s.stream_key || s.key || s.id || "",
+          streamCategory: s.category || category,
         });
       }
     }
