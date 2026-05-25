@@ -50,6 +50,12 @@ interface LiveMatch {
   sources: MatchSource[];
   isLive: boolean;
   apiSource?: string;
+  streamKey?: string;
+  streamCategory?: string;
+  channelCode?: string;
+  channelName?: string;
+  damitvId?: string;
+  watchfootyId?: number;
   sportsrcCategory?: string;
   sportsrcId?: string;
 }
@@ -474,6 +480,13 @@ export default function LivePage() {
       matchPopular: match.popular,
       matchSources: JSON.stringify(match.sources),
       matchDate: match.date,
+      matchStreamKey: match.streamKey || "",
+      matchStreamCategory: match.streamCategory || "",
+      matchChannelName: match.channelName || "",
+      matchChannelCode: match.channelCode || "",
+      matchDamitvId: match.damitvId || "",
+      matchWatchfootyId: match.watchfootyId ? String(match.watchfootyId) : "",
+      matchApiSource: match.apiSource || "",
       matchSportsrcCategory: match.sportsrcCategory || "",
       matchSportsrcId: match.sportsrcId || "",
     } as any);
@@ -562,7 +575,7 @@ export default function LivePage() {
         <div className="flex flex-col items-center justify-center py-20 gap-4">
           <div className="w-12 h-12 rounded-full border-2 border-[#7c6cf0]/30 border-t-[#7c6cf0] animate-spin" />
           <p className="text-sm text-white/30">Loading matches...</p>
-          <p className="text-[10px] text-white/15">Fetching from streamed.pk + thesportsdb</p>
+          <p className="text-[10px] text-white/15">Fetching from streamfree + cdnlivetv + dami-tv + watchfooty + more</p>
         </div>
       )}
 
@@ -697,9 +710,13 @@ export default function LivePage() {
       {/* ── FOOTER ── */}
       <div className="mt-12 pt-6 border-t border-white/[0.04]">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400/50 border border-emerald-500/10">streamed.pk</span>
-            <span className="text-[9px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400/50 border border-blue-500/10">thesportsdb</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400/50 border border-emerald-500/10">streamfree</span>
+            <span className="text-[9px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400/50 border border-blue-500/10">cdnlivetv</span>
+            <span className="text-[9px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400/50 border border-purple-500/10">dami-tv</span>
+            <span className="text-[9px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400/50 border border-cyan-500/10">watchfooty</span>
+            <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400/50 border border-amber-500/10">streamed.pk</span>
+            <span className="text-[9px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400/50 border border-red-500/10">espn</span>
             <span className="text-[10px] text-white/15">{matches.length} matches</span>
           </div>
           <button onClick={() => navigate({ page: "watchnow" })} className="text-[10px] text-[#7c6cf0]/50 hover:text-[#7c6cf0] transition-colors">

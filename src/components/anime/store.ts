@@ -115,7 +115,7 @@ type Route =
   | { page: "guide" }
   | { page: "features" }
   | { page: "live" }
-  | { page: "live-watch"; matchId: string; matchTitle: string; matchSport: string; matchSportName: string; matchHomeTeam: string; matchAwayTeam: string; matchHomeBadge: string; matchAwayBadge: string; matchPoster: string; matchPopular: boolean; matchSources: string; matchDate: number; matchSportsrcCategory?: string; matchSportsrcId?: string }
+  | { page: "live-watch"; matchId: string; matchTitle: string; matchSport: string; matchSportName: string; matchHomeTeam: string; matchAwayTeam: string; matchHomeBadge: string; matchAwayBadge: string; matchPoster: string; matchPopular: boolean; matchSources: string; matchDate: number; matchStreamKey?: string; matchStreamCategory?: string; matchChannelName?: string; matchChannelCode?: string; matchDamitvId?: string; matchWatchfootyId?: string; matchApiSource?: string; matchSportsrcCategory?: string; matchSportsrcId?: string }
   | { page: "novel" }
   | { page: "novel-detail"; novelId: string; novelTitle: string; novelCover: string; novelAuthor: string; novelSource: string }
   | { page: "novel-read"; novelId: string; novelTitle: string; chapterId: string; chapterNum: number; chapterTitle: string; totalChapters: number; novelSource: string };

@@ -1,17 +1,25 @@
 import { NextResponse } from "next/server";
 
 // ============================================================
-// EDGE M3U8 PROXY — Fast Edge Runtime proxy for M3U8 manifests + TS segments
+// EDGE M3U8 PROXY — Fast Edge Runtime proxy for M3U8 manifests
 // Runs on Vercel's Edge Network for LOW LATENCY
-// Only proxies .m3u8 and .ts files from allowed hosts
+// Only used when M3U8 server blocks CORS (streamfree CDN usually doesn't need this)
 // ============================================================
 
 export const runtime = "edge";
 
 const ALLOWED_HOSTS = [
-  "lb3.strmd.top", "lb1.strmd.top", "lb2.strmd.top",
-  "strmd.top", "cdn.strmd.top",
   "streamfree.app",
+  "afafjhahkjfhkajsf.shop",  // streamfree CDN (may rotate)
+  "cdn-lab.shop",
+  "lb1.strmd.top", "lb2.strmd.top", "lb3.strmd.top",
+  "lb4.strmd.top", "lb5.strmd.top", "lb6.strmd.top",
+  "lb7.strmd.top", "lb8.strmd.top", "lb9.strmd.top",
+  "lb10.strmd.top", "lb11.strmd.top", "lb12.strmd.top",
+  "strmd.top",
+  "edge.cdnlivetv.ru",
+  "cdnlivetv.ru",
+  "dami-tv.pro",
 ];
 
 export async function GET(
@@ -50,16 +58,35 @@ export async function GET(
 
   const cleanParams = new URLSearchParams(url.searchParams);
   cleanParams.delete("url");
+  const referer = cleanParams.get("referer") || "";
+  if (referer) cleanParams.delete("referer");
   const cleanQs = cleanParams.toString();
-  const fullUrl = cleanQs ? `${targetUrl}?${cleanQs}` : targetUrl;
+  const fullUrl = cleanQs ? `${targetUrl}&${cleanQs}` : targetUrl;
 
   try {
+    // Determine the correct Referer based on the target host
+    let refererValue = referer;
+    if (!refererValue) {
+      if (targetHost.includes("streamfree") || targetHost.includes("cdn-lab") || targetHost.includes("afafjhahkjfhkajsf")) {
+        refererValue = "https://streamfree.app/";
+      } else if (targetHost.includes("cdnlivetv")) {
+        refererValue = "https://cdnlivetv.tv/";
+      } else if (targetHost.includes("dami-tv")) {
+        refererValue = "https://dami-tv.pro/";
+      } else if (targetHost.includes("strmd")) {
+        refererValue = "https://embedsports.top/";
+      }
+    }
+
     const headers: Record<string, string> = {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
       Accept: "*/*",
-      Referer: "https://embedsports.top/",
-      Origin: "https://embedsports.top",
+      Referer: refererValue,
     };
+
+    if (refererValue) {
+      try { headers["Origin"] = new URL(refererValue).origin; } catch {}
+    }
 
     const range = req.headers.get("range");
     if (range) headers["Range"] = range;
@@ -79,23 +106,29 @@ export async function GET(
       if (val) responseHeaders[h] = val;
     }
 
+    // For M3U8 manifests, rewrite relative URLs to go through the proxy
     const contentType = res.headers.get("content-type") || "";
     if (contentType.includes("mpegurl") || fullUrl.includes(".m3u8")) {
       let manifest = new TextDecoder().decode(body);
+
+      // Rewrite absolute URLs from allowed hosts to go through proxy
       for (const host of ALLOWED_HOSTS) {
         manifest = manifest.replace(
           new RegExp(`https?://${host.replace(/\./g, "\\.")}/`, "g"),
           `/api/live/proxy/https://${host}/`
         );
       }
+
+      // Rewrite relative segment URLs
       const baseUrl = fullUrl.substring(0, fullUrl.lastIndexOf("/") + 1);
       manifest = manifest.replace(
-        /^([^#\n][^\s]+\.ts[^\n]*)$/gm,
+        /^([^#\n][^\s]+(\.ts|\.js|\.m3u8)[^\n]*)$/gm,
         (match, segment) => {
           if (segment.startsWith("http") || segment.startsWith("/api/")) return match;
           return `/api/live/proxy/${baseUrl}${segment}`;
         }
       );
+
       return new NextResponse(new TextEncoder().encode(manifest), { status: res.status, headers: responseHeaders });
     }
 

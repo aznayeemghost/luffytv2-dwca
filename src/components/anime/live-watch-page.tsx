@@ -5,9 +5,10 @@ import { useAppStore } from "./store";
 import Hls from "hls.js";
 
 // ============================================================
-// LIVE WATCH PAGE — hls.js Native Player (NO IFRAME)
-// Primary: Extract M3U8 → play with hls.js → proxy through Edge if CORS blocked
-// Fallback: Open embed URL in new tab (always works)
+// LIVE WATCH PAGE — hls.js Native Player
+// PRIMARY: streamfree.app M3U8 (CDN has CORS!)
+// FALLBACK: Edge proxy for CORS-blocked M3U8
+// LAST RESORT: Open embed in new tab
 // ============================================================
 
 interface StreamInfo {
@@ -15,10 +16,14 @@ interface StreamInfo {
   streamNo: number;
   language: string;
   hd: boolean;
-  embedUrl: string;
+  m3u8Url: string;
+  quality: string;
   source: string;
   viewers?: number;
   provider?: string;
+  embedUrl?: string;
+  corsEnabled: boolean;
+  referer?: string;
 }
 
 interface LiveWatchProps {
@@ -34,6 +39,13 @@ interface LiveWatchProps {
   matchPopular: boolean;
   matchSources: string;
   matchDate: number;
+  matchStreamKey?: string;
+  matchStreamCategory?: string;
+  matchChannelName?: string;
+  matchChannelCode?: string;
+  matchDamitvId?: string;
+  matchWatchfootyId?: string;
+  matchApiSource?: string;
   matchSportsrcCategory?: string;
   matchSportsrcId?: string;
 }
@@ -150,42 +162,34 @@ export default function LiveWatchPage(props: LiveWatchProps) {
   const [playerState, setPlayerState] = useState<"loading" | "playing" | "error" | "countdown" | "no-stream">("loading");
   const [playerError, setPlayerError] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [m3u8Url, setM3u8Url] = useState("");
-  const [useProxy, setUseProxy] = useState(true);
-  const [matchData, setMatchData] = useState<any>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   const sportIcon = sportIcons[props.matchSport || "other"] || "📺";
   const sportColor = sportColors[props.matchSport || "other"] || "#6b7280";
   const isUpcoming = props.matchDate ? props.matchDate > Date.now() : false;
   const matchTime = props.matchDate ? formatMatchTime(props.matchDate) : "";
+  const hasTeams = props.matchHomeTeam || props.matchAwayTeam;
 
-  // Build match data from props
-  useEffect(() => {
-    const sources = (() => { try { return JSON.parse(props.matchSources || "[]"); } catch { return []; } })();
-    setMatchData({
-      id: props.matchId,
-      title: props.matchTitle,
-      sport: props.matchSport,
-      sportName: props.matchSportName || sportNames[props.matchSport] || props.matchSport,
-      date: props.matchDate,
-      homeTeam: props.matchHomeTeam,
-      awayTeam: props.matchAwayTeam,
-      homeBadge: props.matchHomeBadge,
-      awayBadge: props.matchAwayBadge,
-      sources,
-    });
-  }, [props.matchId]);
-
-  // Fetch stream servers from embed API
+  // Fetch stream M3U8 URLs from our resolver API
   useEffect(() => {
     if (!props.matchId) return;
     const fetchStreams = async () => {
       setLoadingStreams(true);
       try {
-        const sourcesParam = props.matchSources || "[]";
-        const cat = props.matchSportsrcCategory || props.matchSport || "";
-        const srcId = props.matchSportsrcId || props.matchId || "";
-        const res = await fetch(`/api/live/embed?matchId=${encodeURIComponent(props.matchId)}&sources=${encodeURIComponent(sourcesParam)}&sportsrcCategory=${encodeURIComponent(cat)}&sportsrcId=${encodeURIComponent(srcId)}`);
+        const params = new URLSearchParams();
+        params.set("matchId", props.matchId);
+        params.set("provider", props.matchApiSource || "");
+
+        // Pass all provider-specific fields
+        if (props.matchStreamKey) params.set("streamKey", props.matchStreamKey);
+        if (props.matchStreamCategory) params.set("streamCategory", props.matchStreamCategory);
+        if (props.matchChannelName) params.set("channelName", props.matchChannelName);
+        if (props.matchChannelCode) params.set("channelCode", props.matchChannelCode);
+        if (props.matchDamitvId) params.set("damitvId", props.matchDamitvId);
+        if (props.matchWatchfootyId) params.set("watchfootyId", props.matchWatchfootyId);
+        if (props.matchSources) params.set("sources", props.matchSources);
+
+        const res = await fetch(`/api/live/embed?${params.toString()}`);
         if (res.ok) {
           const data = await res.json();
           if (data.streams?.length > 0) {
@@ -199,40 +203,110 @@ export default function LiveWatchPage(props: LiveWatchProps) {
       setLoadingStreams(false);
     };
     fetchStreams();
-  }, [props.matchId, props.matchSources]);
+  }, [props.matchId, props.matchSources, retryCount]);
 
-  // When activeStream changes, try to extract M3U8 and play with hls.js
+  // When activeStream changes, play with hls.js
   useEffect(() => {
-    if (!activeStream?.embedUrl) {
+    if (!activeStream?.m3u8Url) {
       if (isUpcoming) setPlayerState("countdown");
       else setPlayerState("no-stream");
       return;
     }
 
-    const tryPlayStream = async () => {
+    const playStream = () => {
       setPlayerState("loading");
       setPlayerError("");
 
-      // Step 1: Extract M3U8 URL from embed page
-      try {
-        const res = await fetch(`/api/live/m3u8?embedUrl=${encodeURIComponent(activeStream.embedUrl)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.m3u8Url) {
-            setM3u8Url(data.m3u8Url);
-            playWithHls(data.m3u8Url, true); // try with proxy first
-            return;
-          }
-        }
-      } catch {}
+      const m3u8Url = activeStream.m3u8Url;
 
-      // M3U8 extraction failed — try direct embed (might work for some providers)
-      // If that fails, user can open in new tab
-      setPlayerState("error");
-      setPlayerError("Could not extract video stream. Click 'Watch in New Tab' below.");
+      // Destroy previous HLS instance
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+
+      if (!videoRef.current) return;
+
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          xhrSetup: (xhr, url) => {
+            // Set Referer header for M3U8 requests
+            if (activeStream.referer) {
+              xhr.setRequestHeader("Referer", activeStream.referer);
+            }
+          },
+        });
+        hlsRef.current = hls;
+
+        // Decide: direct or via proxy
+        const useProxy = !activeStream.corsEnabled;
+        const finalUrl = useProxy
+          ? `/api/live/proxy/${m3u8Url}?referer=${encodeURIComponent(activeStream.referer || "")}`
+          : m3u8Url;
+
+        hls.loadSource(finalUrl);
+        hls.attachMedia(videoRef.current);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          videoRef.current?.play().catch(() => {});
+          setPlayerState("playing");
+        });
+
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (data.fatal) {
+            // If proxy failed and we were using proxy, try direct
+            if (useProxy && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              console.log("Proxy failed, trying direct M3U8...");
+              hls.destroy();
+              hlsRef.current = null;
+
+              const hls2 = new Hls({
+                enableWorker: true,
+                lowLatencyMode: true,
+                xhrSetup: (xhr, url) => {
+                  if (activeStream.referer) {
+                    xhr.setRequestHeader("Referer", activeStream.referer);
+                  }
+                },
+              });
+              hlsRef.current = hls2;
+              hls2.loadSource(m3u8Url);
+              hls2.attachMedia(videoRef.current!);
+
+              hls2.on(Hls.Events.MANIFEST_PARSED, () => {
+                videoRef.current?.play().catch(() => {});
+                setPlayerState("playing");
+              });
+
+              hls2.on(Hls.Events.ERROR, (_e2, data2) => {
+                if (data2.fatal) {
+                  setPlayerState("error");
+                  setPlayerError("Stream failed to load. Try a different server or open in new tab.");
+                }
+              });
+              return;
+            }
+            setPlayerState("error");
+            setPlayerError("Stream failed to load. Try a different server or open in new tab.");
+          }
+        });
+      } else if (videoRef.current.canPlayType("application/vnd.apple.mpegurl")) {
+        // Safari native HLS
+        const useProxy = !activeStream.corsEnabled;
+        const finalUrl = useProxy
+          ? `/api/live/proxy/${m3u8Url}?referer=${encodeURIComponent(activeStream.referer || "")}`
+          : m3u8Url;
+        videoRef.current.src = finalUrl;
+        videoRef.current.addEventListener("loadedmetadata", () => {
+          videoRef.current?.play().catch(() => {});
+          setPlayerState("playing");
+        });
+      }
     };
 
-    tryPlayStream();
+    playStream();
 
     return () => {
       if (hlsRef.current) {
@@ -242,63 +316,8 @@ export default function LiveWatchPage(props: LiveWatchProps) {
     };
   }, [activeStream]);
 
-  // Play M3U8 with hls.js
-  const playWithHls = useCallback((url: string, proxy: boolean) => {
-    if (!videoRef.current) return;
-
-    // Destroy previous instance
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-
-    // Route through edge proxy if CORS is an issue
-    const finalUrl = proxy
-      ? `/api/live/proxy/${url.replace("https://", "https://").replace("http://", "http://")}`
-      : url;
-
-    if (Hls.isSupported()) {
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: true,
-        xhrSetup: (xhr, url) => {
-          xhr.setRequestHeader("Referer", "https://embedsports.top/");
-        },
-      });
-      hlsRef.current = hls;
-
-      hls.loadSource(finalUrl);
-      hls.attachMedia(videoRef.current);
-
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        videoRef.current?.play().catch(() => {});
-        setPlayerState("playing");
-      });
-
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) {
-          if (proxy && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            // Proxy failed, try without proxy (direct M3U8)
-            playWithHls(url, false);
-            return;
-          }
-          setPlayerState("error");
-          setPlayerError("Stream failed to load. Try a different server or open in new tab.");
-        }
-      });
-    } else if (videoRef.current.canPlayType("application/vnd.apple.mpegurl")) {
-      // Safari native HLS
-      videoRef.current.src = finalUrl;
-      videoRef.current.addEventListener("loadedmetadata", () => {
-        videoRef.current?.play().catch(() => {});
-        setPlayerState("playing");
-      });
-    }
-  }, []);
-
   const switchStream = (stream: StreamInfo) => {
     setActiveStream(stream);
-    setM3u8Url("");
   };
 
   const toggleFullscreen = async () => {
@@ -318,7 +337,10 @@ export default function LiveWatchPage(props: LiveWatchProps) {
     return () => document.removeEventListener("fullscreenchange", handler);
   }, []);
 
-  const hasTeams = props.matchHomeTeam || props.matchAwayTeam;
+  // Get the embed URL for "Watch in New Tab" fallback
+  const newTabUrl = activeStream?.embedUrl || (props.matchStreamKey && props.matchStreamCategory
+    ? `https://streamfree.app/player/${props.matchStreamCategory}/${props.matchStreamKey}`
+    : "");
 
   return (
     <div className="min-h-screen flex flex-col -mx-4 lg:-mx-8 -mt-[75px] pt-0">
@@ -328,7 +350,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
         className="relative w-full bg-black"
         style={{ aspectRatio: isFullscreen ? "auto" : "16/9", minHeight: isFullscreen ? "100vh" : "280px" }}
       >
-        {/* Hidden video element for hls.js */}
+        {/* Video element for hls.js */}
         <video
           ref={videoRef}
           className="absolute inset-0 w-full h-full"
@@ -341,8 +363,16 @@ export default function LiveWatchPage(props: LiveWatchProps) {
         {playerState === "loading" && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black z-20">
             <div className="w-14 h-14 rounded-full border-2 border-[#7c6cf0]/30 border-t-[#7c6cf0] animate-spin" />
-            <p className="text-sm text-white/40">Extracting stream...</p>
-            <p className="text-[10px] text-white/20">Getting M3U8 from embed page</p>
+            <p className="text-sm text-white/40">Loading stream...</p>
+            <p className="text-[10px] text-white/20">
+              {activeStream?.provider === "streamfree" ? "streamfree.app CDN" :
+               activeStream?.provider === "cdnlivetv" ? "cdnlivetv.tv" :
+               activeStream?.provider === "damitv" ? "dami-tv.pro" :
+               "Connecting to server..."}
+            </p>
+            {activeStream?.corsEnabled && (
+              <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400">CORS Direct</span>
+            )}
           </div>
         )}
 
@@ -361,7 +391,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
           </div>
         )}
 
-        {/* Error / no stream */}
+        {/* Error */}
         {playerState === "error" && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-black z-20">
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-amber-500/10">
@@ -370,10 +400,10 @@ export default function LiveWatchPage(props: LiveWatchProps) {
               </svg>
             </div>
             <p className="text-sm text-white/50">Stream could not load inline</p>
-            <p className="text-[10px] text-white/20 max-w-xs text-center">{playerError || "Try opening in a new tab — this always works!"}</p>
-            {activeStream?.embedUrl && (
+            <p className="text-[10px] text-white/20 max-w-xs text-center">{playerError || "Try a different server or open in a new tab"}</p>
+            {newTabUrl && (
               <a
-                href={activeStream.embedUrl}
+                href={newTabUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="mt-2 px-6 py-3 rounded-xl bg-emerald-500/15 text-emerald-400 text-sm font-bold hover:bg-emerald-500/25 border border-emerald-500/20 transition-all flex items-center gap-2"
@@ -391,16 +421,23 @@ export default function LiveWatchPage(props: LiveWatchProps) {
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-white/5">
               <span className="text-3xl">{sportIcon}</span>
             </div>
-            <p className="text-sm text-white/40">No streams available</p>
-            <button onClick={() => navigate({ page: "live" } as any)} className="px-4 py-2 rounded-xl bg-white/[0.06] text-white/40 text-[11px] font-bold hover:bg-white/[0.08] transition-all">Browse Matches</button>
+            <p className="text-sm text-white/40">No streams available yet</p>
+            <p className="text-[10px] text-white/20">The stream will appear when the event goes live</p>
+            {newTabUrl && (
+              <a href={newTabUrl} target="_blank" rel="noopener noreferrer"
+                className="px-4 py-2 rounded-xl bg-emerald-500/10 text-emerald-400/70 text-[11px] font-bold hover:text-emerald-400 border border-emerald-500/10 transition-all">
+                Try External Player
+              </a>
+            )}
+            <button onClick={() => setRetryCount(c => c + 1)} className="px-4 py-2 rounded-xl bg-white/[0.06] text-white/40 text-[11px] font-bold hover:bg-white/[0.08] transition-all">Refresh Streams</button>
           </div>
         )}
 
         {/* Player controls overlay */}
         {playerState === "playing" && (
           <div className="absolute top-3 right-3 z-30 flex items-center gap-2">
-            {activeStream?.embedUrl && (
-              <a href={activeStream.embedUrl} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg bg-black/40 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/60 transition-all" title="Open in new tab">
+            {newTabUrl && (
+              <a href={newTabUrl} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg bg-black/40 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/60 transition-all" title="Open in new tab">
                 <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3" /></svg>
               </a>
             )}
@@ -409,6 +446,16 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                 {isFullscreen ? <path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3" /> : <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3" />}
               </svg>
             </button>
+          </div>
+        )}
+
+        {/* Live badge when playing */}
+        {playerState === "playing" && (
+          <div className="absolute top-3 left-3 z-30">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/80 backdrop-blur-sm text-white text-[10px] font-bold">
+              <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+              LIVE
+            </span>
           </div>
         )}
       </div>
@@ -437,6 +484,9 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 text-[10px] font-bold">
                         <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> LIVE
                       </span>
+                    )}
+                    {activeStream?.corsEnabled && playerState === "playing" && (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[10px] font-bold">CORS DIRECT</span>
                     )}
                   </div>
                 </div>
@@ -486,17 +536,23 @@ export default function LiveWatchPage(props: LiveWatchProps) {
             {streams.length > 0 ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                 {streams.map((stream, idx) => {
-                  const isActive = activeStream?.embedUrl === stream.embedUrl;
+                  const isActive = activeStream?.m3u8Url === stream.m3u8Url;
                   return (
                     <button
-                      key={`${stream.id}-${stream.streamNo}-${idx}`}
+                      key={`${stream.id}-${idx}`}
                       onClick={() => switchStream(stream)}
                       className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-[11px] font-bold transition-all ${
                         isActive ? "bg-[#7c6cf0] text-white shadow-[0_0_16px_rgba(124,108,240,0.3)]" : "bg-white/[0.04] text-white/50 hover:text-white/70 hover:bg-white/[0.06] border border-white/[0.06]"
                       }`}
                     >
-                      <span className="truncate">{stream.source?.charAt(0).toUpperCase()}{stream.source?.slice(1)} {stream.streamNo}</span>
-                      {stream.hd && <span className="text-[7px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 font-black">HD</span>}
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className="truncate">{stream.source?.charAt(0).toUpperCase()}{stream.source?.slice(1)}</span>
+                        <span className="text-[9px] opacity-50">{stream.quality}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {stream.corsEnabled && <span className="text-[7px] px-1 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-black">CORS</span>}
+                        {stream.hd && <span className="text-[7px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 font-black">HD</span>}
+                      </div>
                     </button>
                   );
                 })}
@@ -504,6 +560,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
             ) : !loadingStreams ? (
               <div className="text-center py-6 bg-white/[0.02] rounded-xl border border-white/[0.04]">
                 <p className="text-xs text-white/25">No servers found</p>
+                <p className="text-[10px] text-white/15 mt-1">The stream will appear when the event goes live</p>
               </div>
             ) : (
               <div className="flex items-center gap-2 px-3 py-2">
@@ -514,20 +571,20 @@ export default function LiveWatchPage(props: LiveWatchProps) {
 
             {/* Action buttons */}
             <div className="flex flex-wrap gap-2 mt-3">
-              {activeStream?.embedUrl && (
+              {newTabUrl && (
                 <a
-                  href={activeStream.embedUrl}
+                  href={newTabUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-[12px] font-bold bg-emerald-500/10 text-emerald-400/70 hover:text-emerald-400 hover:bg-emerald-500/15 border border-emerald-500/10 transition-all"
                 >
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3" /></svg>
-                  Watch in New Tab (Always Works)
+                  Watch in New Tab
                 </a>
               )}
-              <button onClick={() => setActiveStream(activeStream)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-bold bg-white/[0.04] text-white/30 hover:text-white/50 border border-white/[0.06] transition-all">
+              <button onClick={() => setRetryCount(c => c + 1)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-bold bg-white/[0.04] text-white/30 hover:text-white/50 border border-white/[0.06] transition-all">
                 <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16" /></svg>
-                Retry
+                Refresh
               </button>
             </div>
           </div>
@@ -536,10 +593,10 @@ export default function LiveWatchPage(props: LiveWatchProps) {
           <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
             <h4 className="text-[11px] font-bold text-white/25 uppercase tracking-wider mb-2" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>Stream Tips</h4>
             <div className="space-y-1.5 text-[11px] text-white/20 leading-relaxed">
-              <p>If the inline player doesn&apos;t load, click <strong className="text-emerald-400/60">Watch in New Tab</strong> — this always works</p>
-              <p>Try different servers — some are faster than others</p>
-              <p>The video plays natively using HLS — no iframe needed</p>
-              <p>Upcoming matches show a countdown timer</p>
+              <p>Servers with <strong className="text-emerald-400/60">CORS</strong> badge play directly — no proxy needed</p>
+              <p>Try different quality options if one doesn&apos;t work</p>
+              <p>If the inline player doesn&apos;t load, click <strong className="text-emerald-400/60">Watch in New Tab</strong></p>
+              <p>Upcoming matches show a countdown timer until kickoff</p>
             </div>
           </div>
         </div>
@@ -590,18 +647,26 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                 )}
                 <div className="flex items-center justify-between py-1.5">
                   <span className="text-[11px] text-white/25">Player</span>
-                  <span className="text-[11px] text-white/60 font-medium">{playerState === "playing" ? "HLS Native" : "Connecting..."}</span>
+                  <span className="text-[11px] text-white/60 font-medium">
+                    {playerState === "playing" ? (activeStream?.corsEnabled ? "HLS Direct" : "HLS via Proxy") : "Connecting..."}
+                  </span>
                 </div>
+                {activeStream?.provider && (
+                  <div className="flex items-center justify-between py-1.5">
+                    <span className="text-[11px] text-white/25">Source</span>
+                    <span className="text-[11px] text-white/60 font-medium">{activeStream.provider}</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-2">
             <button onClick={() => navigate({ page: "live" } as any)} className="py-2.5 rounded-xl bg-white/[0.04] border border-white/[0.06] text-[11px] font-bold text-white/40 hover:text-white/60 hover:bg-white/[0.06] transition-all">Browse More</button>
-            {activeStream?.embedUrl ? (
-              <a href={activeStream.embedUrl} target="_blank" rel="noopener noreferrer" className="py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/15 text-[11px] font-bold text-emerald-400/60 hover:text-emerald-400 hover:bg-emerald-500/15 transition-all text-center">Watch in Tab</a>
+            {newTabUrl ? (
+              <a href={newTabUrl} target="_blank" rel="noopener noreferrer" className="py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/15 text-[11px] font-bold text-emerald-400/60 hover:text-emerald-400 hover:bg-emerald-500/15 transition-all text-center">Watch in Tab</a>
             ) : (
-              <button onClick={() => setActiveStream(activeStream)} className="py-2.5 rounded-xl bg-white/[0.04] border border-white/[0.06] text-[11px] font-bold text-white/40 hover:text-white/60 transition-all">Refresh</button>
+              <button onClick={() => setRetryCount(c => c + 1)} className="py-2.5 rounded-xl bg-white/[0.04] border border-white/[0.06] text-[11px] font-bold text-white/40 hover:text-white/60 transition-all">Refresh</button>
             )}
           </div>
         </div>
