@@ -366,7 +366,7 @@ export async function GET(req: Request) {
 
   const resolvePromises: Promise<StreamResult[]>[] = [];
 
-  if (streamKey && streamCategory) resolvePromises.push(resolveStreamfree(streamCategory, streamCategory));
+  if (streamKey && streamCategory) resolvePromises.push(resolveStreamfree(streamCategory, streamKey));
   if (channelName && channelCode) resolvePromises.push(resolveCDNLivetv(channelName, channelCode));
   if (damitvId) resolvePromises.push(resolveDamiTV(damitvId));
   if (watchfootyId) resolvePromises.push(resolveWatchfooty(parseInt(watchfootyId)));

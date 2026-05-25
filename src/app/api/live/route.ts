@@ -8,7 +8,7 @@ import { NextResponse } from "next/server";
 //          sportsembed.su (embeds), embedsports.top (embeds)
 // ============================================================
 
-const TIMEOUT = 6000;
+const TIMEOUT = 10000;
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 
 function makeCtrl() { const c = new AbortController(); setTimeout(() => c.abort(), TIMEOUT); return c; }

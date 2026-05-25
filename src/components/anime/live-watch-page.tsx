@@ -159,10 +159,11 @@ export default function LiveWatchPage(props: LiveWatchProps) {
   const [streams, setStreams] = useState<StreamInfo[]>([]);
   const [activeStream, setActiveStream] = useState<StreamInfo | null>(null);
   const [loadingStreams, setLoadingStreams] = useState(true);
-  const [playerState, setPlayerState] = useState<"loading" | "playing" | "error" | "countdown" | "no-stream">("loading");
+  const [playerState, setPlayerState] = useState<"loading" | "playing" | "error" | "countdown" | "no-stream" | "ready">("loading");
   const [playerError, setPlayerError] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [showPlayButton, setShowPlayButton] = useState(true);
 
   const sportIcon = sportIcons[props.matchSport || "other"] || "📺";
   const sportColor = sportColors[props.matchSport || "other"] || "#6b7280";
@@ -193,9 +194,13 @@ export default function LiveWatchPage(props: LiveWatchProps) {
           const data = await res.json();
           if (data.streams?.length > 0) {
             setStreams(data.streams);
-            // Prefer M3U8 streams first, then embed
+            // Prefer embed streams first (they work reliably), then CORS M3U8, then proxy M3U8
+            const embedStream = data.streams.find((s: StreamInfo) => s.streamType === "embed" && s.embedUrl);
+            const corsStream = data.streams.find((s: StreamInfo) => s.streamType === "m3u8" && s.m3u8Url && s.corsEnabled);
             const m3u8Stream = data.streams.find((s: StreamInfo) => s.streamType === "m3u8" && s.m3u8Url);
-            setActiveStream(m3u8Stream || data.streams[0]);
+            // Embed streams auto-play in iframe, so prefer those for instant playback
+            const best = embedStream || corsStream || m3u8Stream || data.streams[0];
+            setActiveStream(best);
           }
         }
       } catch (err) {
@@ -206,11 +211,11 @@ export default function LiveWatchPage(props: LiveWatchProps) {
     fetchStreams();
   }, [props.matchId, props.matchSources, retryCount]);
 
-  // When activeStream changes, play with hls.js (M3U8 only)
+  // When activeStream changes, prepare the player
   useEffect(() => {
-    // For embed streams, just mark as playing (iframe handles it)
+    // For embed streams, show play button then auto-play
     if (activeStream?.streamType === "embed") {
-      setPlayerState("playing");
+      setPlayerState("ready");
       return;
     }
 
@@ -220,9 +225,11 @@ export default function LiveWatchPage(props: LiveWatchProps) {
       return;
     }
 
+    // For M3U8 streams, auto-play directly (no play button needed for M3U8)
     const playStream = () => {
       setPlayerState("loading");
       setPlayerError("");
+      setShowPlayButton(false);
 
       const m3u8Url = activeStream.m3u8Url;
 
@@ -256,6 +263,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           videoRef.current?.play().catch(() => {});
           setPlayerState("playing");
+          setShowPlayButton(false);
         });
 
         hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -279,6 +287,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
               hls2.on(Hls.Events.MANIFEST_PARSED, () => {
                 videoRef.current?.play().catch(() => {});
                 setPlayerState("playing");
+                setShowPlayButton(false);
               });
 
               hls2.on(Hls.Events.ERROR, (_e2, data2) => {
@@ -302,6 +311,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
         videoRef.current.addEventListener("loadedmetadata", () => {
           videoRef.current?.play().catch(() => {});
           setPlayerState("playing");
+          setShowPlayButton(false);
         });
       }
     };
@@ -318,6 +328,13 @@ export default function LiveWatchPage(props: LiveWatchProps) {
 
   const switchStream = (stream: StreamInfo) => {
     setActiveStream(stream);
+    setShowPlayButton(true);
+  };
+
+  // Handle play button click for embed streams
+  const handlePlayClick = () => {
+    setShowPlayButton(false);
+    setPlayerState("playing");
   };
 
   const toggleFullscreen = async () => {
@@ -357,11 +374,12 @@ export default function LiveWatchPage(props: LiveWatchProps) {
             style={{ zIndex: playerState === "playing" ? 10 : 0 }}
             playsInline
             controls
+            autoPlay
           />
         )}
 
         {/* Iframe for embed streams (streamed.pk, embedsports.top) */}
-        {isEmbedStream && activeStream?.embedUrl && (
+        {isEmbedStream && activeStream?.embedUrl && playerState === "playing" && !showPlayButton && (
           <iframe
             src={`/api/embed/proxy?url=${encodeURIComponent(activeStream.embedUrl)}`}
             className="absolute inset-0 w-full h-full border-0"
@@ -372,8 +390,40 @@ export default function LiveWatchPage(props: LiveWatchProps) {
           />
         )}
 
+        {/* Play button overlay for all stream types */}
+        {showPlayButton && (playerState === "ready" || playerState === "playing") && (
+          <div
+            className="absolute inset-0 flex items-center justify-center z-25 cursor-pointer"
+            style={{ zIndex: 25 }}
+            onClick={handlePlayClick}
+          >
+            {/* Dark overlay */}
+            <div className="absolute inset-0 bg-black/60" />
+            {/* Play button */}
+            <div className="relative z-10 flex flex-col items-center gap-4">
+              <div
+                className="w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110"
+                style={{
+                  background: `linear-gradient(135deg, ${sportColor}dd, ${sportColor}99)`,
+                  boxShadow: `0 0 40px ${sportColor}40, 0 0 80px ${sportColor}20`,
+                }}
+              >
+                <svg className="w-10 h-10 text-white ml-1" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+              </div>
+              <div className="text-center">
+                <p className="text-white font-bold text-lg" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>Click to Play</p>
+                <p className="text-white/40 text-xs mt-1">
+                  {isEmbedStream ? `Embed Player • ${activeStream?.source || 'Stream'}` : `HLS Player • ${activeStream?.quality || 'HD'}`}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Loading overlay */}
-        {playerState === "loading" && !isEmbedStream && (
+        {playerState === "loading" && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black z-20">
             <div className="w-14 h-14 rounded-full border-2 border-[#7c6cf0]/30 border-t-[#7c6cf0] animate-spin" />
             <p className="text-sm text-white/40">Loading stream...</p>
@@ -381,10 +431,14 @@ export default function LiveWatchPage(props: LiveWatchProps) {
               {activeStream?.provider === "streamfree" ? "streamfree.app CDN" :
                activeStream?.provider === "cdnlivetv" ? "cdnlivetv.tv" :
                activeStream?.provider === "damitv" ? "dami-tv.pro" :
+               activeStream?.provider === "streamed" ? "Streamed • Loading embed..." :
                "Connecting to server..."}
             </p>
             {activeStream?.corsEnabled && (
               <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400">CORS Direct</span>
+            )}
+            {isEmbedStream && (
+              <span className="text-[9px] px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-400">Embed Player</span>
             )}
           </div>
         )}
