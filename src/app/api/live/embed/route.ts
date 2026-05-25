@@ -123,8 +123,25 @@ async function resolveStreamfree(category: string, streamKey: string): Promise<S
       });
       streamNo++;
     }
+
+    // ALWAYS add streamfree embed URL as a sandbox iframe fallback
+    // This ensures every streamfree match has a working embed option
+    const streamfreeEmbedUrl = `https://streamfree.app/embed/${category}/${streamKey}`;
+    results.push({
+      id: `sf-embed-${streamKey}`, streamNo, language: "English", hd: true,
+      m3u8Url: "", quality: "720p", source: "streamfree", viewers: 0, provider: "streamfree",
+      corsEnabled: false, referer: "https://streamfree.app/", embedUrl: streamfreeEmbedUrl, streamType: "embed",
+    });
   } catch (err: any) {
     console.error("streamfree resolve error:", err.message);
+    // Even if M3U8 extraction fails, still provide the embed URL
+    if (category && streamKey) {
+      results.push({
+        id: `sf-embed-fallback-${streamKey}`, streamNo: 1, language: "English", hd: true,
+        m3u8Url: "", quality: "720p", source: "streamfree", viewers: 0, provider: "streamfree",
+        corsEnabled: false, referer: "https://streamfree.app/", embedUrl: `https://streamfree.app/embed/${category}/${streamKey}`, streamType: "embed",
+      });
+    }
   }
 
   return results;
@@ -158,6 +175,14 @@ async function resolveCDNLivetv(channelName: string, channelCode: string): Promi
         corsEnabled: false, referer: "https://cdnlivetv.tv/", streamType: "m3u8",
       });
     }
+
+    // ALWAYS add cdnlivetv embed URL as sandbox iframe fallback
+    const cdnEmbedUrl = `https://cdnlivetv.tv/channel/${encodeURIComponent(channelName)}/${channelCode}`;
+    results.push({
+      id: `cdn-embed-${channelName}-${channelCode}`, streamNo: results.length + 1, language: "English", hd: true,
+      m3u8Url: "", quality: "720p", source: "cdnlivetv", viewers: 0, provider: "cdnlivetv",
+      corsEnabled: false, referer: "https://cdnlivetv.tv/", embedUrl: cdnEmbedUrl, streamType: "embed",
+    });
   } catch {}
   return results;
 }
@@ -402,13 +427,14 @@ export async function GET(req: Request) {
     return true;
   });
 
-  // Sort: M3U8 first, then CORS-enabled first, then by quality
+  // Sort: EMBED streams first (they work most reliably in sandbox iframes)
+  // Then CORS-enabled M3U8, then other M3U8, then by quality
   const qualityOrder: Record<string, number> = { "2160p": 1, "1080p": 2, "HD": 2, "720p": 3, "SD": 4, "540p": 5, "480p": 6 };
   uniqueStreams.sort((a, b) => {
-    // M3U8 streams first
-    if (a.streamType === "m3u8" && b.streamType !== "m3u8") return -1;
-    if (a.streamType !== "m3u8" && b.streamType === "m3u8") return 1;
-    // Then CORS enabled
+    // Embed streams first — they work reliably in sandbox iframes
+    if (a.streamType === "embed" && b.streamType !== "embed") return -1;
+    if (a.streamType !== "embed" && b.streamType === "embed") return 1;
+    // Then CORS enabled M3U8
     if (a.corsEnabled && !b.corsEnabled) return -1;
     if (!a.corsEnabled && b.corsEnabled) return 1;
     return (qualityOrder[a.quality] || 99) - (qualityOrder[b.quality] || 99);
