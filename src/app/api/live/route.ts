@@ -541,6 +541,33 @@ export async function GET(req: Request) {
       });
     }
 
+    // For TV mode: if no cdnlivetv channels found, convert streamfree "always live" channels
+    if (mode === "tv") {
+      const cdnChannelsFound = matches.some(m => m.apiSource === "cdnlivetv");
+      if (!cdnChannelsFound) {
+        // Use streamfree "always live" streams as TV channels
+        const alwaysLive = matches.filter(m => m.apiSource === "streamfree" && m.streamKey && !m.homeTeam && !m.awayTeam);
+        for (const m of alwaysLive) {
+          m.sport = "other";
+          m.sportName = "TV Channel";
+          m.channelName = m.title;
+          m.channelCode = m.streamCategory || "";
+          m.isLive = true;
+        }
+        // Also use all streamfree sources as channels for TV view
+        const streamfreeAsChannels = matches.filter(m => m.apiSource === "streamfree" && m.streamKey);
+        for (const m of streamfreeAsChannels) {
+          if (!m.channelName) {
+            m.channelName = m.homeTeam || m.title;
+            m.channelCode = m.streamCategory || "";
+          }
+          if (m.sportName !== "TV Channel") {
+            m.sportName = m.sportName || "TV Channel";
+          }
+        }
+      }
+    }
+
     // Count by source
     const sourceCounts: Record<string, number> = {};
     for (const m of matches) {
