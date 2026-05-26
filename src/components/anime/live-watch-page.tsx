@@ -170,6 +170,8 @@ export default function LiveWatchPage(props: LiveWatchProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [showPlayButton, setShowPlayButton] = useState(false); // Embed auto-plays, M3U8 needs click
+  const [iframeFailed, setIframeFailed] = useState(false);
+  const iframeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Scoreboard live score state ──
   const [scoreboardData, setScoreboardData] = useState<{ homeScore: string; awayScore: string; period: string; clock: string; statusDetail: string } | null>(null);
@@ -193,6 +195,12 @@ export default function LiveWatchPage(props: LiveWatchProps) {
   const wfLeague = props.matchLeague;
   const wfLeagueLogo = props.matchLeagueLogo;
   const hasWfScore = wfHomeScore !== undefined && wfAwayScore !== undefined;
+
+  // Computed best available scores (WatchFooty props > matchStats > ESPN scoreboardData)
+  const bestHomeScore = hasWfScore ? String(wfHomeScore) : (matchStats?.details?.scores?.home ?? scoreboardData?.homeScore ?? null);
+  const bestAwayScore = hasWfScore ? String(wfAwayScore) : (matchStats?.details?.scores?.away ?? scoreboardData?.awayScore ?? null);
+  const bestMinute = wfCurrentMinute || matchStats?.details?.currentMinute || scoreboardData?.clock || null;
+  const hasAnyScore = bestHomeScore !== null && bestAwayScore !== null;
 
   // Parse WatchFooty streams from props
   const wfStreamsFromProps = useMemo(() => {
@@ -239,6 +247,8 @@ export default function LiveWatchPage(props: LiveWatchProps) {
         if (props.matchDamitvId) params.set("damitvId", props.matchDamitvId);
         if (props.matchWatchfootyId) params.set("watchfootyId", props.matchWatchfootyId);
         if (props.matchSources) params.set("sources", props.matchSources);
+        if (props.matchSportsrcCategory) params.set("sportsrcCategory", props.matchSportsrcCategory);
+        if (props.matchSportsrcId) params.set("sportsrcId", props.matchSportsrcId);
 
         const res = await fetch(`/api/live/embed?${params.toString()}`);
         let resolverStreams: StreamInfo[] = [];
@@ -286,10 +296,24 @@ export default function LiveWatchPage(props: LiveWatchProps) {
 
   // When activeStream changes, prepare the player
   useEffect(() => {
-    // For embed streams, auto-play in sandbox iframe (no click needed)
+    // Reset iframe failure state on stream switch
+    setIframeFailed(false);
+    if (iframeTimeoutRef.current) {
+      clearTimeout(iframeTimeoutRef.current);
+      iframeTimeoutRef.current = null;
+    }
+
+    // For embed streams, auto-play in iframe (no click needed)
     if (activeStream?.streamType === "embed" && activeStream?.embedUrl) {
       setPlayerState("playing");
       setShowPlayButton(false);
+
+      // Set a timeout: if iframe doesn't load within 15s, fall back to scoreboard
+      iframeTimeoutRef.current = setTimeout(() => {
+        setIframeFailed(true);
+        setPlayerState("scoreboard");
+      }, 15000);
+
       return;
     }
 
@@ -318,7 +342,21 @@ export default function LiveWatchPage(props: LiveWatchProps) {
           setMatchStats(data);
           // Update scores from match details if available
           if (data?.details?.scores) {
-            // These come from the match stats response
+            const homeScore = data.details.scores.home;
+            const awayScore = data.details.scores.away;
+            if (homeScore !== undefined && awayScore !== undefined && !hasWfScore) {
+              setScoreboardData(prev => ({
+                homeScore: String(homeScore),
+                awayScore: String(awayScore),
+                period: data.details.currentMinute || prev?.period || "",
+                clock: data.details.currentMinute ? `${data.details.currentMinute}'` : prev?.clock || "",
+                statusDetail: data.details.status || prev?.statusDetail || "",
+              }));
+            }
+          }
+          // Also try extracting team info from matchStats if not available in props
+          if (data?.details?.homeTeam && !props.matchHomeTeam) {
+            // matchStats has team data that props don't — useful for scoreboard overlay
           }
         }
       } catch {}
@@ -330,9 +368,8 @@ export default function LiveWatchPage(props: LiveWatchProps) {
     return () => clearInterval(iv);
   }, [props.matchWatchfootyId]);
 
-  // ── Fetch ESPN live score when scoreboard is showing ──
+  // ── Fetch ESPN live score (always when team names are available) ──
   useEffect(() => {
-    if (playerState !== "scoreboard") return;
     if (!props.matchHomeTeam && !props.matchAwayTeam) return;
 
     const fetchScore = async () => {
@@ -398,10 +435,10 @@ export default function LiveWatchPage(props: LiveWatchProps) {
     };
 
     fetchScore();
-    // Refresh score every 30 seconds while scoreboard is showing
+    // Refresh score every 30 seconds
     const iv = setInterval(fetchScore, 30000);
     return () => clearInterval(iv);
-  }, [playerState, props.matchSport, props.matchHomeTeam, props.matchAwayTeam]);
+  }, [props.matchSport, props.matchHomeTeam, props.matchAwayTeam]);
 
   const switchStream = useCallback((stream: StreamInfo) => {
     setActiveStream(stream);
@@ -574,7 +611,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
         )}
 
         {/* Iframe for embed streams — direct iframe, no sandbox blocking */}
-        {isEmbedStream && activeStream?.embedUrl && playerState === "playing" && (
+        {isEmbedStream && activeStream?.embedUrl && playerState === "playing" && !iframeFailed && (
           <iframe
             src={activeStream.embedUrl}
             className="absolute inset-0 w-full h-full border-0"
@@ -582,6 +619,17 @@ export default function LiveWatchPage(props: LiveWatchProps) {
             allowFullScreen
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
             referrerPolicy="no-referrer"
+            onError={() => {
+              setIframeFailed(true);
+              setPlayerState("scoreboard");
+            }}
+            onLoad={() => {
+              // iframe loaded successfully — clear the timeout
+              if (iframeTimeoutRef.current) {
+                clearTimeout(iframeTimeoutRef.current);
+                iframeTimeoutRef.current = null;
+              }
+            }}
           />
         )}
 
@@ -689,7 +737,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
         )}
 
         {/* ═══════════════════════════════════════════════════
-            SCOREBOARD — Shows when no streams are available
+            SCOREBOARD — Shows when no streams are available OR iframe failed
             Displays team info, live score (from ESPN if available),
             match status, and refresh/try-embed buttons
             ═══════════════════════════════════════════════════ */}
@@ -700,19 +748,19 @@ export default function LiveWatchPage(props: LiveWatchProps) {
 
             <div className="relative z-10 flex flex-col items-center gap-5 px-6 py-8 w-full max-w-lg">
               {/* Live indicator */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap justify-center">
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-500/15 text-red-400 text-[11px] font-bold">
                   <span className="relative flex h-2 w-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
                   </span>
-                  LIVE SCOREBOARD
+                  {iframeFailed ? "STREAM UNAVAILABLE" : "LIVE SCOREBOARD"}
                 </span>
                 <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>{sportIcon} {props.matchSportName || props.matchSport}</span>
-                {wfLeague && (
+                {(wfLeague || matchStats?.details?.league) && (
                   <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/[0.06] text-white/50">
-                    {wfLeagueLogo && <img src={wfLeagueLogo} alt="" className="w-3.5 h-3.5 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />}
-                    {wfLeague}
+                    {(wfLeagueLogo || matchStats?.details?.leagueLogo) && <img src={wfLeagueLogo || matchStats?.details?.leagueLogo} alt="" className="w-3.5 h-3.5 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />}
+                    {wfLeague || matchStats?.details?.league}
                   </span>
                 )}
               </div>
@@ -723,44 +771,30 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                 <div className="h-1" style={{ background: `linear-gradient(90deg, ${sportColor}, ${sportColor}50, transparent)` }} />
 
                 <div className="p-6">
-                  {/* Team names */}
-                  {hasTeams ? (
+                  {/* Team names — always show if we have team data or can extract from title/matchStats */}
+                  {(hasTeams || matchStats?.details?.homeTeam || matchStats?.details?.awayTeam) ? (
                     <div className="flex items-center justify-between gap-4">
                       {/* Home Team */}
                       <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
-                        {props.matchHomeBadge ? (
-                          <img src={props.matchHomeBadge} alt={props.matchHomeTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                        {(props.matchHomeBadge || matchStats?.details?.homeBadge) ? (
+                          <img src={props.matchHomeBadge || matchStats?.details?.homeBadge} alt={props.matchHomeTeam || matchStats?.details?.homeTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                         ) : (
-                          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}15`, color: `${sportColor}90` }}>{props.matchHomeTeam?.charAt(0) || "H"}</div>
+                          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}15`, color: `${sportColor}90` }}>{(props.matchHomeTeam || matchStats?.details?.homeTeam)?.charAt(0) || "H"}</div>
                         )}
-                        <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{props.matchHomeTeam || "Home"}</span>
+                        <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{props.matchHomeTeam || matchStats?.details?.homeTeam || "Home"}</span>
                       </div>
 
                       {/* Score / VS */}
                       <div className="flex flex-col items-center gap-1 px-4">
-                        {hasWfScore ? (
+                        {hasAnyScore ? (
                           <>
                             <div className="flex items-center gap-3">
-                              <span className="text-3xl font-black" style={{ color: sportColor }}>{wfHomeScore}</span>
+                              <span className="text-3xl font-black" style={{ color: sportColor }}>{bestHomeScore}</span>
                               <span className="text-lg text-white/20 font-bold">-</span>
-                              <span className="text-3xl font-black" style={{ color: sportColor }}>{wfAwayScore}</span>
+                              <span className="text-3xl font-black" style={{ color: sportColor }}>{bestAwayScore}</span>
                             </div>
-                            {wfCurrentMinute && (
-                              <span className="text-[10px] text-amber-400/60 font-bold">{wfCurrentMinute}&apos;</span>
-                            )}
-                          </>
-                        ) : scoreboardData ? (
-                          <>
-                            <div className="flex items-center gap-3">
-                              <span className="text-3xl font-black" style={{ color: sportColor }}>{scoreboardData.homeScore}</span>
-                              <span className="text-lg text-white/20 font-bold">-</span>
-                              <span className="text-3xl font-black" style={{ color: sportColor }}>{scoreboardData.awayScore}</span>
-                            </div>
-                            {scoreboardData.period && (
-                              <span className="text-[10px] text-white/30 font-bold uppercase tracking-wider">{scoreboardData.period}</span>
-                            )}
-                            {scoreboardData.clock && (
-                              <span className="text-[10px] text-amber-400/60 font-bold">{scoreboardData.clock}</span>
+                            {bestMinute && (
+                              <span className="text-[10px] text-amber-400/60 font-bold">{bestMinute}{!wfCurrentMinute && !matchStats?.details?.currentMinute ? "" : "'"}</span>
                             )}
                           </>
                         ) : (
@@ -770,25 +804,31 @@ export default function LiveWatchPage(props: LiveWatchProps) {
 
                       {/* Away Team */}
                       <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
-                        {props.matchAwayBadge ? (
-                          <img src={props.matchAwayBadge} alt={props.matchAwayTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                        {(props.matchAwayBadge || matchStats?.details?.awayBadge) ? (
+                          <img src={props.matchAwayBadge || matchStats?.details?.awayBadge} alt={props.matchAwayTeam || matchStats?.details?.awayTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                         ) : (
-                          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}15`, color: `${sportColor}90` }}>{props.matchAwayTeam?.charAt(0) || "A"}</div>
+                          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}15`, color: `${sportColor}90` }}>{(props.matchAwayTeam || matchStats?.details?.awayTeam)?.charAt(0) || "A"}</div>
                         )}
-                        <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{props.matchAwayTeam || "Away"}</span>
+                        <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{props.matchAwayTeam || matchStats?.details?.awayTeam || "Away"}</span>
                       </div>
                     </div>
                   ) : (
-                    /* No team data — show title */
+                    /* No team data at all — show match title as fallback */
                     <div className="text-center">
                       <h3 className="text-lg font-bold text-white/80 mb-2">{props.matchTitle}</h3>
-                      {scoreboardData && (
+                      {hasAnyScore ? (
+                        <div className="flex items-center justify-center gap-3">
+                          <span className="text-2xl font-black" style={{ color: sportColor }}>{bestHomeScore}</span>
+                          <span className="text-lg text-white/20 font-bold">-</span>
+                          <span className="text-2xl font-black" style={{ color: sportColor }}>{bestAwayScore}</span>
+                        </div>
+                      ) : scoreboardData ? (
                         <div className="flex items-center justify-center gap-3">
                           <span className="text-2xl font-black" style={{ color: sportColor }}>{scoreboardData.homeScore}</span>
                           <span className="text-lg text-white/20 font-bold">-</span>
                           <span className="text-2xl font-black" style={{ color: sportColor }}>{scoreboardData.awayScore}</span>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   )}
 
@@ -816,17 +856,28 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                 </div>
               )}
 
+              {/* Iframe failed message */}
+              {iframeFailed && (
+                <div className="text-center px-4 py-3 rounded-xl bg-amber-500/[0.08] border border-amber-500/[0.15] w-full">
+                  <p className="text-[11px] text-amber-400/70 mb-1">Stream failed to load — showing live scoreboard instead</p>
+                  <p className="text-[9px] text-white/20">Try a different server or refresh</p>
+                </div>
+              )}
+
               {/* No streams message */}
-              <div className="text-center px-4 py-3 rounded-xl bg-white/[0.02] border border-white/[0.04] w-full">
-                <p className="text-[11px] text-white/30 mb-1">No streams available for this match</p>
-                <p className="text-[9px] text-white/15">The stream will appear when a source goes live</p>
-              </div>
+              {!iframeFailed && (
+                <div className="text-center px-4 py-3 rounded-xl bg-white/[0.02] border border-white/[0.04] w-full">
+                  <p className="text-[11px] text-white/30 mb-1">No streams available for this match</p>
+                  <p className="text-[9px] text-white/15">The stream will appear when a source goes live</p>
+                </div>
+              )}
 
               {/* Action buttons */}
               <div className="flex gap-2 flex-wrap justify-center w-full">
                 {streams.filter(s => s.streamType === "embed").length > 0 && (
                   <button
                     onClick={() => {
+                      setIframeFailed(false);
                       const embedStream = streams.find(s => s.streamType === "embed" && s.embedUrl);
                       if (embedStream) switchStream(embedStream);
                     }}
@@ -844,7 +895,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                     Watch in New Tab
                   </a>
                 )}
-                <button onClick={() => setRetryCount(c => c + 1)} className="px-5 py-2.5 rounded-xl bg-white/[0.06] text-white/40 text-[11px] font-bold hover:bg-white/[0.08] transition-all flex items-center gap-2">
+                <button onClick={() => { setIframeFailed(false); setRetryCount(c => c + 1); }} className="px-5 py-2.5 rounded-xl bg-white/[0.06] text-white/40 text-[11px] font-bold hover:bg-white/[0.08] transition-all flex items-center gap-2">
                   <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16" /></svg>
                   Refresh
                 </button>
@@ -925,31 +976,50 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                 </div>
               )}
 
-              {hasTeams && (
-                <div className="bg-white/[0.02] border border-white/[0.04] rounded-xl p-5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
-                      {props.matchHomeBadge ? (
-                        <img src={props.matchHomeBadge} alt={props.matchHomeTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                      ) : (
-                        <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{props.matchHomeTeam?.charAt(0) || "H"}</div>
-                      )}
-                      <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{props.matchHomeTeam || "Home"}</span>
-                    </div>
-                    <div className="px-6">
+              {/* Team info card — always visible */}
+              <div className="bg-white/[0.02] border border-white/[0.04] rounded-xl p-5">
+                {/* League name */}
+                {(wfLeague || matchStats?.details?.league) && (
+                  <div className="flex items-center justify-center gap-2 mb-4">
+                    {(wfLeagueLogo || matchStats?.details?.leagueLogo) && <img src={wfLeagueLogo || matchStats?.details?.leagueLogo} alt="" className="w-4 h-4 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />}
+                    <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider">{wfLeague || matchStats?.details?.league}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
+                    {(props.matchHomeBadge || matchStats?.details?.homeBadge) ? (
+                      <img src={props.matchHomeBadge || matchStats?.details?.homeBadge} alt={props.matchHomeTeam || matchStats?.details?.homeTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    ) : (
+                      <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{(props.matchHomeTeam || matchStats?.details?.homeTeam)?.charAt(0) || "H"}</div>
+                    )}
+                    <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{props.matchHomeTeam || matchStats?.details?.homeTeam || "Home"}</span>
+                  </div>
+                  <div className="flex flex-col items-center gap-1 px-6">
+                    {hasAnyScore ? (
+                      <>
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl font-black" style={{ color: sportColor }}>{bestHomeScore}</span>
+                          <span className="text-lg text-white/20 font-bold">-</span>
+                          <span className="text-2xl font-black" style={{ color: sportColor }}>{bestAwayScore}</span>
+                        </div>
+                        {bestMinute && (
+                          <span className="text-[10px] text-amber-400/60 font-bold">{bestMinute}{!wfCurrentMinute && !matchStats?.details?.currentMinute ? "" : "'"}</span>
+                        )}
+                      </>
+                    ) : (
                       <span className="text-lg font-black text-white/15 tracking-widest">VS</span>
-                    </div>
-                    <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
-                      {props.matchAwayBadge ? (
-                        <img src={props.matchAwayBadge} alt={props.matchAwayTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                      ) : (
-                        <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{props.matchAwayTeam?.charAt(0) || "A"}</div>
-                      )}
-                      <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{props.matchAwayTeam || "Away"}</span>
-                    </div>
+                    )}
+                  </div>
+                  <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
+                    {(props.matchAwayBadge || matchStats?.details?.awayBadge) ? (
+                      <img src={props.matchAwayBadge || matchStats?.details?.awayBadge} alt={props.matchAwayTeam || matchStats?.details?.awayTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    ) : (
+                      <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{(props.matchAwayTeam || matchStats?.details?.awayTeam)?.charAt(0) || "A"}</div>
+                    )}
+                    <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{props.matchAwayTeam || matchStats?.details?.awayTeam || "Away"}</span>
                   </div>
                 </div>
-              )}
+              </div>
             </div>
           </div>
 

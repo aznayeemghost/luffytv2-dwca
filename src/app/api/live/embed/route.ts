@@ -389,28 +389,69 @@ export async function GET(req: Request) {
   }
 
   const resolvePromises: Promise<StreamResult[]>[] = [];
+  const triedProviders = new Set<string>();
 
-  if (streamKey && streamCategory) resolvePromises.push(resolveStreamfree(streamCategory, streamKey));
-  // cdnlivetv API is dead — use dami-tv.pro for all TV channels
-  if (channelName && channelCode) resolvePromises.push(resolveDamiTV(channelCode));
-  if (damitvId) resolvePromises.push(resolveDamiTV(damitvId));
-  if (watchfootyId) resolvePromises.push(resolveWatchfooty(parseInt(watchfootyId)));
-  if (parsedSources.length > 0) resolvePromises.push(resolveStreamedPK(parsedSources));
+  // ── Always try ALL providers for maximum stream availability ──
+  // This ensures Echo, Dami, Alpha, etc. from StreamedPK appear
+  // alongside WatchFooty and DamiTV streams for every match
 
-  const sportsrcCategory = url.searchParams.get("sportsrcCategory") || streamCategory || "";
+  // Provider 1: streamfree (needs streamKey + streamCategory)
+  if (streamKey && streamCategory) {
+    resolvePromises.push(resolveStreamfree(streamCategory, streamKey));
+    triedProviders.add("streamfree");
+  }
+
+  // Provider 2: DamiTV — try with ALL available IDs
+  const damitvIds = new Set<string>();
+  if (damitvId) damitvIds.add(damitvId);
+  if (channelCode) damitvIds.add(channelCode);
+  if (matchId) damitvIds.add(matchId);
+  for (const id of damitvIds) {
+    resolvePromises.push(resolveDamiTV(id));
+    triedProviders.add("damitv");
+  }
+
+  // Provider 3: WatchFooty
+  if (watchfootyId) {
+    resolvePromises.push(resolveWatchfooty(parseInt(watchfootyId)));
+    triedProviders.add("watchfooty");
+  }
+
+  // Provider 4: StreamedPK — ALWAYS try with parsed sources AND fallback sources
+  if (parsedSources.length > 0) {
+    resolvePromises.push(resolveStreamedPK(parsedSources));
+    triedProviders.add("streamed");
+  }
+  // Also try StreamedPK with common sources using matchId as fallback
+  if (matchId && parsedSources.length === 0) {
+    resolvePromises.push(resolveStreamedPK([
+      { source: "admin", id: matchId },
+      { source: "echo", id: matchId },
+      { source: "delta", id: matchId },
+      { source: "bravo", id: matchId },
+      { source: "alpha", id: matchId },
+    ]));
+    triedProviders.add("streamed");
+  }
+
+  // Provider 5 & 6: sportsembed.su + embedsports.top — ALWAYS try
+  const sportsrcCategory = url.searchParams.get("sportsrcCategory") || streamCategory || "sports";
   const sportsrcId = url.searchParams.get("sportsrcId") || matchId || "";
-  if (provider === "sportsembed" || (sportsrcCategory && sportsrcId)) {
+  if (sportsrcId) {
     resolvePromises.push(resolveSportsembedSu(sportsrcCategory, sportsrcId));
-  }
-  if (provider === "embedsports" || (sportsrcCategory && sportsrcId)) {
     resolvePromises.push(resolveEmbedsportsTop(sportsrcCategory, sportsrcId));
+    triedProviders.add("sportsembed");
+    triedProviders.add("embedsports");
   }
 
+  // Fallback: if no providers matched at all, try everything with matchId
   if (resolvePromises.length === 0 && matchId) {
     resolvePromises.push(resolveDamiTV(matchId));
-    if (parsedSources.length === 0) {
-      resolvePromises.push(resolveStreamedPK([{ source: "admin", id: matchId }]));
-    }
+    resolvePromises.push(resolveStreamedPK([
+      { source: "admin", id: matchId },
+      { source: "echo", id: matchId },
+      { source: "delta", id: matchId },
+    ]));
     resolvePromises.push(resolveSportsembedSu("sports", matchId));
     resolvePromises.push(resolveEmbedsportsTop("sports", matchId));
   }
