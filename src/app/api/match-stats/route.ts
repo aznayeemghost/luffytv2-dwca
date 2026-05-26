@@ -18,6 +18,30 @@ function makeCtrl() {
   return c;
 }
 
+// ── Deep conversion: {value, displayValue} objects → primitives ──
+// WatchFooty API returns many fields as {value: X, displayValue: "X"} objects.
+// React cannot render objects as children, so we must recursively convert them.
+function deepToPrimitive(obj: any): any {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) return obj.map(deepToPrimitive);
+  if (typeof obj === "object") {
+    // Check for the {value, displayValue} pattern
+    const keys = Object.keys(obj);
+    if (keys.length <= 2 && ("value" in obj || "displayValue" in obj)) {
+      // This is a WatchFooty value object — extract the primitive
+      if ("value" in obj) return deepToPrimitive(obj.value);
+      if ("displayValue" in obj) return deepToPrimitive(obj.displayValue);
+    }
+    // Recursively convert all nested properties
+    const result: Record<string, any> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      result[k] = deepToPrimitive(v);
+    }
+    return result;
+  }
+  return obj;
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const matchId = url.searchParams.get("id");
@@ -46,11 +70,13 @@ export async function GET(req: Request) {
     let details = null;
 
     if (statsRes.status === "fulfilled" && statsRes.value.ok) {
-      stats = await statsRes.value.json();
+      const rawStats = await statsRes.value.json();
+      stats = deepToPrimitive(rawStats);
     }
 
     if (detailsRes.status === "fulfilled" && detailsRes.value.ok) {
-      details = await detailsRes.value.json();
+      const rawDetails = await detailsRes.value.json();
+      details = deepToPrimitive(rawDetails);
       // Prepend WatchFooty base URL to relative image paths
       if (details.teams) {
         if (details.teams.home?.logoUrl && !details.teams.home.logoUrl.startsWith("http")) {

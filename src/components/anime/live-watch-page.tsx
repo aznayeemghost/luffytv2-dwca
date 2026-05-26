@@ -218,9 +218,9 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                 matchWatchfootyStreams: match.watchfootyStreams ? JSON.stringify(match.watchfootyStreams) : (currentRoute as any).matchWatchfootyStreams,
                 matchLeague: match.league || (currentRoute as any).matchLeague,
                 matchLeagueLogo: match.leagueLogo || (currentRoute as any).matchLeagueLogo,
-                matchHomeScore: match.homeScore ?? (currentRoute as any).matchHomeScore,
-                matchAwayScore: match.awayScore ?? (currentRoute as any).matchAwayScore,
-                matchCurrentMinute: match.currentMinute || (currentRoute as any).matchCurrentMinute,
+                matchHomeScore: toVal(match.homeScore) ?? (currentRoute as any).matchHomeScore,
+                matchAwayScore: toVal(match.awayScore) ?? (currentRoute as any).matchAwayScore,
+                matchCurrentMinute: toVal(match.currentMinute) || (currentRoute as any).matchCurrentMinute,
                 matchStreamKey: match.streamKey || (currentRoute as any).matchStreamKey,
                 matchStreamCategory: match.streamCategory || (currentRoute as any).matchStreamCategory,
                 matchDamitvId: match.damitvId || (currentRoute as any).matchDamitvId,
@@ -261,11 +261,18 @@ export default function LiveWatchPage(props: LiveWatchProps) {
   const toVal = (v: any): any => {
     if (v === null || v === undefined) return undefined;
     if (typeof v === "object" && v !== null) {
-      if ("value" in v) return v.value;
-      if ("displayValue" in v) return v.displayValue;
+      if ("value" in v) return toVal(v.value);
+      if ("displayValue" in v) return toVal(v.displayValue);
       return undefined;
     }
     return v;
+  };
+  // Safe string conversion for JSX rendering — NEVER render objects as React children
+  const safeStr = (v: any): string => {
+    const val = toVal(v);
+    if (val === null || val === undefined) return "";
+    if (typeof val === "object") return ""; // Final safety net
+    return String(val);
   };
   const wfHomeScore = toVal(props.matchHomeScore ?? fetchedMatch?.homeScore);
   const wfAwayScore = toVal(props.matchAwayScore ?? fetchedMatch?.awayScore);
@@ -275,9 +282,9 @@ export default function LiveWatchPage(props: LiveWatchProps) {
   const hasWfScore = wfHomeScore !== undefined && wfAwayScore !== undefined;
 
   // Computed best available scores (WatchFooty props > matchStats > ESPN scoreboardData)
-  const bestHomeScore = hasWfScore ? String(wfHomeScore) : (matchStats?.details?.scores?.home ? String(matchStats.details.scores.home) : scoreboardData?.homeScore ?? null);
-  const bestAwayScore = hasWfScore ? String(wfAwayScore) : (matchStats?.details?.scores?.away ? String(matchStats.details.scores.away) : scoreboardData?.awayScore ?? null);
-  const bestMinute = wfCurrentMinute ? String(wfCurrentMinute) : (matchStats?.details?.currentMinute ? String(matchStats.details.currentMinute) : scoreboardData?.clock || null);
+  const bestHomeScore = hasWfScore ? String(wfHomeScore) : (matchStats?.details?.scores?.home ? safeStr(matchStats.details.scores.home) : scoreboardData?.homeScore ?? null);
+  const bestAwayScore = hasWfScore ? String(wfAwayScore) : (matchStats?.details?.scores?.away ? safeStr(matchStats.details.scores.away) : scoreboardData?.awayScore ?? null);
+  const bestMinute = wfCurrentMinute ? String(wfCurrentMinute) : (matchStats?.details?.currentMinute ? safeStr(matchStats.details.currentMinute) : scoreboardData?.clock || null);
   const hasAnyScore = bestHomeScore !== null && bestAwayScore !== null;
 
   // Parse WatchFooty streams from props
@@ -449,15 +456,15 @@ export default function LiveWatchPage(props: LiveWatchProps) {
           setMatchStats(data);
           // Update scores from match details if available
           if (data?.details?.scores) {
-            const homeScore = data.details.scores.home;
-            const awayScore = data.details.scores.away;
+            const homeScore = toVal(data.details.scores.home);
+            const awayScore = toVal(data.details.scores.away);
             if (homeScore !== undefined && awayScore !== undefined && !hasWfScore) {
               setScoreboardData(prev => ({
                 homeScore: String(homeScore),
                 awayScore: String(awayScore),
-                period: data.details.currentMinute || prev?.period || "",
-                clock: data.details.currentMinute ? `${data.details.currentMinute}'` : prev?.clock || "",
-                statusDetail: data.details.status || prev?.statusDetail || "",
+                period: safeStr(data.details.currentMinute) || prev?.period || "",
+                clock: data.details.currentMinute ? `${safeStr(data.details.currentMinute)}'` : prev?.clock || "",
+                statusDetail: safeStr(data.details.status) || prev?.statusDetail || "",
               }));
             }
           }
@@ -867,7 +874,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                 {(wfLeague || matchStats?.details?.league) && (
                   <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/[0.06] text-white/50">
                     {(wfLeagueLogo || matchStats?.details?.leagueLogo) && <img src={wfLeagueLogo || matchStats?.details?.leagueLogo} alt="" className="w-3.5 h-3.5 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />}
-                    {wfLeague || matchStats?.details?.league}
+                    {safeStr(wfLeague || matchStats?.details?.league)}
                   </span>
                 )}
               </div>
@@ -879,16 +886,16 @@ export default function LiveWatchPage(props: LiveWatchProps) {
 
                 <div className="p-6">
                   {/* Team names — always show if we have team data or can extract from title/matchStats */}
-                  {(hasTeams || matchStats?.details?.homeTeam || matchStats?.details?.awayTeam) ? (
+                  {(hasTeams || safeStr(matchStats?.details?.homeTeam) || safeStr(matchStats?.details?.awayTeam)) ? (
                     <div className="flex items-center justify-between gap-4">
                       {/* Home Team */}
                       <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
-                        {(_homeBadge || matchStats?.details?.homeBadge) ? (
-                          <img src={_homeBadge || matchStats?.details?.homeBadge} alt={_homeTeam || matchStats?.details?.homeTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                        {(_homeBadge || safeStr(matchStats?.details?.homeBadge)) ? (
+                          <img src={_homeBadge || safeStr(matchStats?.details?.homeBadge)} alt={safeStr(_homeTeam || matchStats?.details?.homeTeam)} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                         ) : (
-                          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}15`, color: `${sportColor}90` }}>{(_homeTeam || matchStats?.details?.homeTeam)?.charAt(0) || "H"}</div>
+                          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}15`, color: `${sportColor}90` }}>{safeStr(_homeTeam || matchStats?.details?.homeTeam).charAt(0) || "H"}</div>
                         )}
-                        <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{_homeTeam || matchStats?.details?.homeTeam || "Home"}</span>
+                        <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{safeStr(_homeTeam || matchStats?.details?.homeTeam) || "Home"}</span>
                       </div>
 
                       {/* Score / VS */}
@@ -911,12 +918,12 @@ export default function LiveWatchPage(props: LiveWatchProps) {
 
                       {/* Away Team */}
                       <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
-                        {(_awayBadge || matchStats?.details?.awayBadge) ? (
-                          <img src={_awayBadge || matchStats?.details?.awayBadge} alt={_awayTeam || matchStats?.details?.awayTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                        {(_awayBadge || safeStr(matchStats?.details?.awayBadge)) ? (
+                          <img src={_awayBadge || safeStr(matchStats?.details?.awayBadge)} alt={safeStr(_awayTeam || matchStats?.details?.awayTeam)} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                         ) : (
-                          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}15`, color: `${sportColor}90` }}>{(_awayTeam || matchStats?.details?.awayTeam)?.charAt(0) || "A"}</div>
+                          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}15`, color: `${sportColor}90` }}>{safeStr(_awayTeam || matchStats?.details?.awayTeam).charAt(0) || "A"}</div>
                         )}
-                        <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{_awayTeam || matchStats?.details?.awayTeam || "Away"}</span>
+                        <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{safeStr(_awayTeam || matchStats?.details?.awayTeam) || "Away"}</span>
                       </div>
                     </div>
                   ) : (
@@ -1089,17 +1096,17 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                 {(wfLeague || matchStats?.details?.league) && (
                   <div className="flex items-center justify-center gap-2 mb-4">
                     {(wfLeagueLogo || matchStats?.details?.leagueLogo) && <img src={wfLeagueLogo || matchStats?.details?.leagueLogo} alt="" className="w-4 h-4 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />}
-                    <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider">{wfLeague || matchStats?.details?.league}</span>
+                    <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider">{safeStr(wfLeague || matchStats?.details?.league)}</span>
                   </div>
                 )}
                 <div className="flex items-center justify-between">
                   <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
-                    {(_homeBadge || matchStats?.details?.homeBadge) ? (
-                      <img src={_homeBadge || matchStats?.details?.homeBadge} alt={_homeTeam || matchStats?.details?.homeTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    {(_homeBadge || safeStr(matchStats?.details?.homeBadge)) ? (
+                      <img src={_homeBadge || safeStr(matchStats?.details?.homeBadge)} alt={safeStr(_homeTeam || matchStats?.details?.homeTeam)} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                     ) : (
-                      <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{(_homeTeam || matchStats?.details?.homeTeam)?.charAt(0) || "H"}</div>
+                      <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{safeStr(_homeTeam || matchStats?.details?.homeTeam).charAt(0) || "H"}</div>
                     )}
-                    <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{_homeTeam || matchStats?.details?.homeTeam || "Home"}</span>
+                    <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{safeStr(_homeTeam || matchStats?.details?.homeTeam) || "Home"}</span>
                   </div>
                   <div className="flex flex-col items-center gap-1 px-6">
                     {hasAnyScore ? (
@@ -1118,12 +1125,12 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                     )}
                   </div>
                   <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
-                    {(_awayBadge || matchStats?.details?.awayBadge) ? (
-                      <img src={_awayBadge || matchStats?.details?.awayBadge} alt={_awayTeam || matchStats?.details?.awayTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    {(_awayBadge || safeStr(matchStats?.details?.awayBadge)) ? (
+                      <img src={_awayBadge || safeStr(matchStats?.details?.awayBadge)} alt={safeStr(_awayTeam || matchStats?.details?.awayTeam)} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                     ) : (
-                      <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{(_awayTeam || matchStats?.details?.awayTeam)?.charAt(0) || "A"}</div>
+                      <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{safeStr(_awayTeam || matchStats?.details?.awayTeam).charAt(0) || "A"}</div>
                     )}
-                    <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{_awayTeam || matchStats?.details?.awayTeam || "Away"}</span>
+                    <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{safeStr(_awayTeam || matchStats?.details?.awayTeam) || "Away"}</span>
                   </div>
                 </div>
               </div>
@@ -1222,8 +1229,8 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                             <div className="grid grid-cols-2 gap-2">
                               {team.statistics?.slice(0, 6).map((stat: any, si: number) => (
                                 <div key={si} className="flex items-center justify-between py-1.5 px-2 rounded-lg bg-white/[0.02]">
-                                  <span className="text-[10px] text-white/35">{stat.name}</span>
-                                  <span className="text-[10px] font-bold" style={{ color: sportColor }}>{stat.value}</span>
+                                  <span className="text-[10px] text-white/35">{safeStr(stat.name)}</span>
+                                  <span className="text-[10px] font-bold" style={{ color: sportColor }}>{safeStr(stat.value)}</span>
                                 </div>
                               ))}
                             </div>
@@ -1243,9 +1250,9 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                           {matchStats.statistics.commentary.slice(0, 20).map((comment: any, ci: number) => (
                             <div key={ci} className="flex gap-3 py-2 border-b border-white/[0.03] last:border-0">
                               {comment.time && (
-                                <span className="text-[9px] font-bold text-white/25 flex-shrink-0 w-10 text-right">{comment.time}</span>
+                                <span className="text-[9px] font-bold text-white/25 flex-shrink-0 w-10 text-right">{safeStr(comment.time)}</span>
                               )}
-                              <span className="text-[10px] text-white/50 leading-relaxed">{comment.text || comment.comment}</span>
+                              <span className="text-[10px] text-white/50 leading-relaxed">{safeStr(comment.text || comment.comment)}</span>
                             </div>
                           ))}
                         </div>
@@ -1263,15 +1270,15 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                           {matchStats.statistics.rosters.map((roster: any, ri: number) => (
                             <div key={ri}>
                               <div className="flex items-center gap-2 mb-2">
-                                <span className="text-[10px] font-bold text-white/60">{roster.team?.name || (ri === 0 ? _homeTeam : _awayTeam)}</span>
+                                <span className="text-[10px] font-bold text-white/60">{safeStr(roster.team?.name) || (ri === 0 ? _homeTeam : _awayTeam)}</span>
                                 {ri === 0 && <span className="text-[7px] px-1 py-0.5 rounded bg-white/5 text-white/25">HOME</span>}
                                 {ri === 1 && <span className="text-[7px] px-1 py-0.5 rounded bg-white/5 text-white/25">AWAY</span>}
                               </div>
                               <div className="space-y-1">
                                 {roster.roster?.filter((p: any) => p.starter).slice(0, 11).map((player: any, pi: number) => (
                                   <div key={pi} className="flex items-center gap-2 py-1">
-                                    <span className="text-[9px] font-bold w-5 text-center text-white/25">{player.jersey || pi + 1}</span>
-                                    <span className="text-[10px] text-white/45 truncate">{player.name}</span>
+                                    <span className="text-[9px] font-bold w-5 text-center text-white/25">{safeStr(player.jersey) || pi + 1}</span>
+                                    <span className="text-[10px] text-white/45 truncate">{safeStr(player.name)}</span>
                                     {player.plays?.length > 0 && (
                                       <span className="ml-auto text-[8px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400/60">{player.plays.length}</span>
                                     )}
@@ -1291,7 +1298,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                       <svg className="w-4 h-4 text-white/20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" /><circle cx="12" cy="10" r="3" /></svg>
                       <div>
                         <span className="text-[10px] text-white/30">Venue</span>
-                        <span className="text-[11px] text-white/60 ml-2">{matchStats.statistics.venue.name || matchStats.statistics.venue}</span>
+                        <span className="text-[11px] text-white/60 ml-2">{safeStr(matchStats.statistics.venue.name || matchStats.statistics.venue)}</span>
                       </div>
                     </div>
                   )}

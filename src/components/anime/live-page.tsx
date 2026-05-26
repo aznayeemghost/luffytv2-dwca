@@ -144,6 +144,17 @@ function timeAgo(dateStr: string): string {
 }
 
 function capitalize(s: string) { return s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, " ") : ""; }
+// Safe primitive extraction: handles WatchFooty {value, displayValue} objects
+function toPrimitive(v: any): any {
+  if (v === null || v === undefined) return v;
+  if (typeof v === "object") {
+    if ("value" in v) return toPrimitive(v.value);
+    if ("displayValue" in v) return toPrimitive(v.displayValue);
+    return undefined;
+  }
+  return v;
+}
+function safeStr(v: any): string { const p = toPrimitive(v); if (p === null || p === undefined) return ""; if (typeof p === "object") return ""; return String(p); }
 
 const sportTagColors: Record<string, string> = {
   football: "bg-emerald-600",
@@ -268,10 +279,10 @@ function MatchCard({ match, onWatch, variant }: { match: LiveMatch; onWatch: (m:
           {hasScore && (
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 mt-6">
               <span className="text-sm font-black text-white bg-black/40 px-2 py-0.5 rounded">
-                {String(match.homeScore)} - {String(match.awayScore)}
+                {safeStr(match.homeScore)} - {safeStr(match.awayScore)}
               </span>
               {match.currentMinute && (
-                <span className="block text-center text-[8px] text-amber-400 font-bold mt-0.5">{String(match.currentMinute)}&apos;</span>
+                <span className="block text-center text-[8px] text-amber-400 font-bold mt-0.5">{safeStr(match.currentMinute)}&apos;</span>
               )}
             </div>
           )}
@@ -379,10 +390,10 @@ function MatchCard({ match, onWatch, variant }: { match: LiveMatch; onWatch: (m:
         {hasScore && (
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 mt-10 flex flex-col items-center">
             <span className="text-xl font-black text-white bg-black/50 px-3 py-1 rounded-lg">
-              {String(match.homeScore)} - {String(match.awayScore)}
+              {safeStr(match.homeScore)} - {safeStr(match.awayScore)}
             </span>
             {match.currentMinute && (
-              <span className="text-[10px] text-amber-400 font-bold mt-1">{String(match.currentMinute)}&apos;</span>
+              <span className="text-[10px] text-amber-400 font-bold mt-1">{safeStr(match.currentMinute)}&apos;</span>
             )}
           </div>
         )}
@@ -591,9 +602,9 @@ export default function LivePage() {
       matchWatchfootyStreams: match.watchfootyStreams ? JSON.stringify(match.watchfootyStreams) : "",
       matchLeague: match.league || "",
       matchLeagueLogo: match.leagueLogo || "",
-      matchHomeScore: match.homeScore,
-      matchAwayScore: match.awayScore,
-      matchCurrentMinute: match.currentMinute || "",
+      matchHomeScore: typeof match.homeScore === "object" ? (match.homeScore?.value ?? match.homeScore?.displayValue ?? "") : match.homeScore,
+      matchAwayScore: typeof match.awayScore === "object" ? (match.awayScore?.value ?? match.awayScore?.displayValue ?? "") : match.awayScore,
+      matchCurrentMinute: typeof match.currentMinute === "object" ? (match.currentMinute?.value ?? match.currentMinute?.displayValue ?? "") : (match.currentMinute || ""),
     } as any);
   };
 
