@@ -110,98 +110,88 @@ async function fetchStreamfreeStreams(): Promise<LiveMatch[]> {
   } catch { return []; }
 }
 
-// ── SOURCE 2: cdnlivetv.tv (762 TV channels + sports events) ──
-async function fetchCDNLivetvChannels(): Promise<LiveMatch[]> {
-  try {
-    const res = await httpGet("https://api.cdnlivetv.tv/api/v1/channels/?user=cdnlivetv&plan=free");
-    if (!res.ok) return [];
-    const data = await res.json();
-    if (!data.channels) return [];
-
-    return data.channels.map((ch: any): LiveMatch => ({
-      id: `cdn-${ch.name}-${ch.code}`,
-      title: `${ch.name} (${ch.code.toUpperCase()})`,
-      sport: "other",
-      sportName: "TV Channel",
-      date: 0,
-      poster: ch.image || "",
-      popular: ch.status === "online",
-      homeTeam: ch.name || "",
-      awayTeam: ch.code?.toUpperCase() || "",
-      homeBadge: ch.image || "",
-      awayBadge: "",
-      isLive: ch.status === "online",
-      apiSource: "cdnlivetv",
-      sources: [],
-      channelCode: ch.code,
-      channelName: ch.name,
-    }));
-  } catch { return []; }
-}
-
-async function fetchCDNLivetvSports(): Promise<LiveMatch[]> {
-  try {
-    const res = await httpGet("https://api.cdnlivetv.tv/api/v1/events/sports/?user=cdnlivetv&plan=free");
-    if (!res.ok) return [];
-    const data = await res.json();
-    if (!data.events) return [];
-
-    return data.events.map((ev: any): LiveMatch => {
-      const sport = ev.sport?.toLowerCase() || "other";
-      return {
-        id: `cdn-sport-${ev.id || Math.random()}`,
-        title: ev.title || ev.name || "Sports Event",
-        sport,
-        sportName: SPORT_NAMES[sport] || capitalize(sport),
-        date: ev.date ? new Date(ev.date).getTime() : (ev.start_time ? ev.start_time * 1000 : 0),
-        poster: ev.poster || ev.image || "",
-        popular: false,
-        homeTeam: ev.home_team || extractTeam(ev.title || "", 0),
-        awayTeam: ev.away_team || extractTeam(ev.title || "", 1),
-        homeBadge: ev.home_logo || "",
-        awayBadge: ev.away_logo || "",
-        isLive: ev.status === "live" || ev.live || false,
-        apiSource: "cdnlivetv-sport",
-        sources: [],
-        channelName: ev.channel || "",
-      };
-    });
-  } catch { return []; }
-}
-
-// ── SOURCE 3: dami-tv.pro (match data + embed URLs) ──
+// ── SOURCE 2: dami-tv.pro (ALL matches + embed URLs, replaces dead cdnlivetv) ──
+// API: https://dami-tv.pro/papi/api/streams — returns all matches with embed URLs
+// Each match has: id, name, poster, starts_at, status, teams, embed URL
 async function fetchDamiTVStreams(): Promise<LiveMatch[]> {
   try {
     const res = await httpGet("https://dami-tv.pro/papi/api/streams");
     if (!res.ok) return [];
     const data = await res.json();
-    if (!data.streams) return [];
+    if (!data.streams || !Array.isArray(data.streams)) return [];
 
     const matches: LiveMatch[] = [];
     for (const category of data.streams) {
       if (!Array.isArray(category.streams)) continue;
       for (const s of category.streams) {
-        const sport = mapCategoryToSport(s.category_name || category.name || "");
+        const sport = mapCategoryToSport(s.category_name || category.category || "");
+        const homeTeam = s.teams?.home?.name || extractTeam(s.name || "", 0);
+        const awayTeam = s.teams?.away?.name || extractTeam(s.name || "", 1);
+        const homeBadge = s.teams?.home?.badge || "";
+        const awayBadge = s.teams?.away?.badge || "";
+        const ts = s.starts_at ? s.starts_at * 1000 : 0;
         matches.push({
-          id: `dami-${s.id || Math.random()}`,
-          title: s.name || s.title || "Match",
+          id: `dami-${s.id || s.uri_name || Math.random().toString(36).slice(2)}`,
+          title: s.name || s.title || formatTitle(s.id || ""),
           sport,
-          sportName: SPORT_NAMES[sport] || capitalize(s.category_name || category.name || ""),
-          date: s.starts_at ? s.starts_at * 1000 : 0,
+          sportName: SPORT_NAMES[sport] || capitalize(s.category_name || category.category || ""),
+          date: ts,
           poster: s.poster || "",
           popular: s.always_live === 1,
-          homeTeam: s.teams?.home?.name || extractTeam(s.name || "", 0),
-          awayTeam: s.teams?.away?.name || extractTeam(s.name || "", 1),
-          homeBadge: s.teams?.home?.badge || "",
-          awayBadge: s.teams?.away?.badge || "",
+          homeTeam,
+          awayTeam,
+          homeBadge,
+          awayBadge,
           isLive: s.status === "live",
           apiSource: "damitv",
           sources: [],
-          damitvId: s.id || s.uri_name || "",
+          damitvId: s.uri_name || s.id || "",
         });
       }
     }
     return matches;
+  } catch { return []; }
+}
+
+// ── SOURCE 2b: dami-tv.pro TV channels (always-live streams as TV channels) ──
+async function fetchDamiTVChannels(): Promise<LiveMatch[]> {
+  try {
+    const res = await httpGet("https://dami-tv.pro/papi/api/streams");
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!data.streams || !Array.isArray(data.streams)) return [];
+
+    const channels: LiveMatch[] = [];
+    for (const category of data.streams) {
+      if (!Array.isArray(category.streams)) continue;
+      for (const s of category.streams) {
+        // Use ALL dami-tv streams as TV channels for the Live TV tab
+        const sport = mapCategoryToSport(s.category_name || category.category || "");
+        const homeTeam = s.teams?.home?.name || extractTeam(s.name || "", 0);
+        const awayTeam = s.teams?.away?.name || extractTeam(s.name || "", 1);
+        const ts = s.starts_at ? s.starts_at * 1000 : 0;
+        channels.push({
+          id: `dami-ch-${s.id || s.uri_name || Math.random().toString(36).slice(2)}`,
+          title: s.name || s.title || formatTitle(s.id || ""),
+          sport: s.status === "live" ? sport : "other",
+          sportName: s.status === "live" ? (SPORT_NAMES[sport] || capitalize(s.category_name || "")) : "TV Channel",
+          date: ts,
+          poster: s.poster || "",
+          popular: s.status === "live",
+          homeTeam: s.status === "live" ? homeTeam : (s.name || ""),
+          awayTeam: s.status === "live" ? awayTeam : (s.league || s.category_name || ""),
+          homeBadge: s.teams?.home?.badge || s.poster || "",
+          awayBadge: s.teams?.away?.badge || "",
+          isLive: s.status === "live" || s.always_live === 1,
+          apiSource: "damitv",
+          sources: [],
+          damitvId: s.uri_name || s.id || "",
+          channelName: s.name || "",
+          channelCode: s.category_name || category.category || "",
+        });
+      }
+    }
+    return channels;
   } catch { return []; }
 }
 
@@ -502,10 +492,9 @@ export async function GET(req: Request) {
 
   try {
     // Fetch from ALL sources in parallel
-    const [streamfree, cdnChannels, cdnSports, damitv, wfLive, wfAll, streamedLive, streamedToday, streamedUpcoming, espn, sportsembed, embedsports] = await Promise.allSettled([
+    const [streamfree, damiChannels, damiSports, wfLive, wfAll, streamedLive, streamedToday, streamedUpcoming, espn, sportsembed, embedsports] = await Promise.allSettled([
       fetchStreamfreeStreams(),
-      mode === "tv" ? fetchCDNLivetvChannels() : Promise.resolve([]),
-      fetchCDNLivetvSports(),
+      mode === "tv" ? fetchDamiTVChannels() : Promise.resolve([]),
       fetchDamiTVStreams(),
       fetchWatchfootyLive(),
       fetchWatchfootyAll(),
@@ -519,9 +508,8 @@ export async function GET(req: Request) {
 
     const allLists: LiveMatch[][] = [
       streamfree.status === "fulfilled" ? streamfree.value : [],
-      cdnChannels.status === "fulfilled" ? cdnChannels.value : [],
-      cdnSports.status === "fulfilled" ? cdnSports.value : [],
-      damitv.status === "fulfilled" ? damitv.value : [],
+      damiChannels.status === "fulfilled" ? damiChannels.value : [],
+      damiSports.status === "fulfilled" ? damiSports.value : [],
       wfLive.status === "fulfilled" ? wfLive.value : [],
       wfAll.status === "fulfilled" ? wfAll.value : [],
       streamedLive.status === "fulfilled" ? streamedLive.value : [],
@@ -549,11 +537,11 @@ export async function GET(req: Request) {
       });
     }
 
-    // For TV mode: if no cdnlivetv channels found, convert streamfree "always live" channels
+    // For TV mode: use dami-tv channels as the primary source, fall back to streamfree
     if (mode === "tv") {
-      const cdnChannelsFound = matches.some(m => m.apiSource === "cdnlivetv");
-      if (!cdnChannelsFound) {
-        // Use streamfree "always live" streams as TV channels
+      const damiChannelsFound = matches.some(m => m.apiSource === "damitv" && m.channelName);
+      if (!damiChannelsFound) {
+        // Fall back to streamfree "always live" streams as TV channels
         const alwaysLive = matches.filter(m => m.apiSource === "streamfree" && m.streamKey && !m.homeTeam && !m.awayTeam);
         for (const m of alwaysLive) {
           m.sport = "other";
@@ -562,7 +550,6 @@ export async function GET(req: Request) {
           m.channelCode = m.streamCategory || "";
           m.isLive = true;
         }
-        // Also use all streamfree sources as channels for TV view
         const streamfreeAsChannels = matches.filter(m => m.apiSource === "streamfree" && m.streamKey);
         for (const m of streamfreeAsChannels) {
           if (!m.channelName) {

@@ -187,10 +187,21 @@ async function resolveCDNLivetv(channelName: string, channelCode: string): Promi
   return results;
 }
 
-// ── PROVIDER 3: dami-tv.pro ──
+// ── PROVIDER 3: dami-tv.pro — embed URL from API, used directly in iframe ──
+// API docs: https://dami-tv.pro/api/ — embed URL format: https://dami-tv.pro/embed/?id=...
+// Also try HLS endpoint and PPV stream endpoint for M3U8 fallback
 async function resolveDamiTV(matchId: string): Promise<StreamResult[]> {
   const results: StreamResult[] = [];
   try {
+    // PRIMARY: Use dami-tv.pro embed URL directly — works instantly in iframe
+    const embedUrl = `https://dami-tv.pro/embed/?id=${encodeURIComponent(matchId)}`;
+    results.push({
+      id: `dami-embed-${matchId}`, streamNo: 1, language: "English", hd: true,
+      m3u8Url: "", quality: "720p", source: "DamiTV", viewers: 0, provider: "damitv",
+      corsEnabled: false, referer: "https://dami-tv.pro/", embedUrl, streamType: "embed",
+    });
+
+    // SECONDARY: Try HLS M3U8 endpoint
     try {
       const m3u8Url = `https://dami-tv.pro/live-hls/channel/${encodeURIComponent(matchId)}/playlist.m3u8`;
       const res = await fetch(m3u8Url, { signal: makeCtrl().signal, headers: { "User-Agent": UA, Referer: "https://dami-tv.pro/" } });
@@ -198,42 +209,26 @@ async function resolveDamiTV(matchId: string): Promise<StreamResult[]> {
         const ct = res.headers.get("content-type") || "";
         if (ct.includes("mpegurl") || ct.includes("octet-stream")) {
           results.push({
-            id: `dami-hls-${matchId}`, streamNo: 1, language: "English", hd: true,
+            id: `dami-hls-${matchId}`, streamNo: results.length + 1, language: "English", hd: true,
             m3u8Url, quality: "720p", source: "damitv-hls", viewers: 0, provider: "damitv",
             corsEnabled: false, referer: "https://dami-tv.pro/", streamType: "m3u8",
           });
         }
       }
     } catch {}
+
+    // TERTIARY: Try PPV stream endpoint for additional embed sources
     try {
       const data = await GETjson(`https://dami-tv.pro/papi/stream/ppv/${encodeURIComponent(matchId)}`, { Referer: "https://dami-tv.pro/" });
       if (Array.isArray(data)) {
         for (const s of data) {
           if (s.embedUrl) {
-            // Try M3U8 extraction, but also keep embed as fallback
-            let m3u8Url = "";
-            try {
-              const embedHtml = await GEThtml(s.embedUrl, { Referer: "https://dami-tv.pro/" });
-              const m3u8Match = embedHtml.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/);
-              if (m3u8Match) m3u8Url = m3u8Match[0];
-            } catch {}
-
-            if (m3u8Url) {
-              results.push({
-                id: `dami-ppv-${matchId}-${s.streamNo}`, streamNo: s.streamNo || results.length + 1,
-                language: s.language || "English", hd: s.hd !== false, m3u8Url, quality: s.hd ? "720p" : "480p",
-                source: s.source || "damitv", viewers: s.viewers || 0, provider: "damitv",
-                corsEnabled: false, referer: "https://dami-tv.pro/", embedUrl: s.embedUrl, streamType: "m3u8",
-              });
-            } else {
-              // Embed fallback — will be played via iframe
-              results.push({
-                id: `dami-embed-${matchId}-${s.streamNo}`, streamNo: s.streamNo || results.length + 1,
-                language: s.language || "English", hd: s.hd !== false, m3u8Url: "", quality: s.hd ? "720p" : "480p",
-                source: s.source || "damitv", viewers: s.viewers || 0, provider: "damitv",
-                corsEnabled: false, referer: "https://dami-tv.pro/", embedUrl: s.embedUrl, streamType: "embed",
-              });
-            }
+            results.push({
+              id: `dami-ppv-${matchId}-${s.streamNo || results.length}`, streamNo: s.streamNo || results.length + 1,
+              language: s.language || "English", hd: s.hd !== false, m3u8Url: "", quality: s.hd ? "HD" : "SD",
+              source: s.source || "damitv-ppv", viewers: s.viewers || 0, provider: "damitv",
+              corsEnabled: false, referer: "https://dami-tv.pro/", embedUrl: s.embedUrl, streamType: "embed",
+            });
           }
         }
       }
@@ -383,7 +378,8 @@ export async function GET(req: Request) {
   const resolvePromises: Promise<StreamResult[]>[] = [];
 
   if (streamKey && streamCategory) resolvePromises.push(resolveStreamfree(streamCategory, streamKey));
-  if (channelName && channelCode) resolvePromises.push(resolveCDNLivetv(channelName, channelCode));
+  // cdnlivetv API is dead — use dami-tv.pro for all TV channels
+  if (channelName && channelCode) resolvePromises.push(resolveDamiTV(channelCode));
   if (damitvId) resolvePromises.push(resolveDamiTV(damitvId));
   if (watchfootyId) resolvePromises.push(resolveWatchfooty(parseInt(watchfootyId)));
   if (parsedSources.length > 0) resolvePromises.push(resolveStreamedPK(parsedSources));

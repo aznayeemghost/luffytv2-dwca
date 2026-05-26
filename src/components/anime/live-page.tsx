@@ -5,7 +5,7 @@ import { useAppStore } from "./store";
 
 // ============================================================
 // LIVE TV & SPORTS — Two-Tab Redesign
-// TAB 1: Live TV — TV channels grid (cdnlivetv 762 channels)
+// TAB 1: Live TV — Sports channels & events from dami-tv.pro
 // TAB 2: Sports — Live sports matches with countdown timers
 // - Featured live hero at top
 // - Prominent countdown timers for upcoming matches
@@ -615,7 +615,7 @@ export default function LivePage() {
       matchDate: 0,
       matchChannelName: channel.name,
       matchChannelCode: channel.code,
-      matchApiSource: "cdnlivetv",
+      matchApiSource: "damitv",
     } as any);
   };
 
@@ -681,7 +681,7 @@ export default function LivePage() {
               </h1>
               <p className="text-sm text-white/25">
                 {activeTab === "tv"
-                  ? "Watch 762+ TV channels from around the world. Sports, news, entertainment & more."
+                  ? "Watch live sports channels and events from dami-tv.pro. Football, NBA, NFL, UFC & more."
                   : "Watch live sports with countdown timers. Multiple sources for every match."}
               </p>
             </div>
@@ -792,7 +792,7 @@ export default function LivePage() {
             <div className="flex flex-col items-center justify-center py-20 gap-4">
               <div className="w-12 h-12 rounded-full border-2 border-[#7c6cf0]/30 border-t-[#7c6cf0] animate-spin" />
               <p className="text-sm text-white/30">Loading channels...</p>
-              <p className="text-[10px] text-white/15">Fetching 762+ TV channels from cdnlivetv</p>
+              <p className="text-[10px] text-white/15">Fetching live sports from dami-tv.pro</p>
             </div>
           )}
 
@@ -960,8 +960,8 @@ export default function LivePage() {
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400/50 border border-emerald-500/10">streamfree</span>
-            <span className="text-[9px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400/50 border border-blue-500/10">cdnlivetv</span>
-            <span className="text-[9px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400/50 border border-purple-500/10">dami-tv</span>
+            <span className="text-[9px] px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-400/50 border border-orange-500/10">dami-tv</span>
+            <span className="text-[9px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400/50 border border-purple-500/10">embedsports</span>
             <span className="text-[9px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400/50 border border-cyan-500/10">watchfooty</span>
             <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400/50 border border-amber-500/10">streamed.pk</span>
             <span className="text-[9px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400/50 border border-red-500/10">espn</span>
