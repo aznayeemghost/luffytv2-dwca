@@ -350,7 +350,9 @@ async function resolveSportsembedSu(category: string, matchId: string): Promise<
 //   admin: embedsports.top/embed/admin/ppv-tampa-bay-rays-vs-baltimore-orioles/1
 //   golf: embedsports.top/embed/golf/22675/1
 // The slug is the same as the StreamedPK source ID for each provider
-// STRATEGY: Try M3U8 extraction first (like GitHub commit bd254ef), then embed fallback
+// STRATEGY: Return embed URLs for iframe playback (like GitHub commit bd254ef)
+// EmbedSports uses obfuscated JS — M3U8 extraction is unreliable
+// Show server name in source label: "Echo S1", "Delta S1", "Golf S1", etc.
 async function resolveEmbedsportsTop(sources: { source: string; id: string }[]): Promise<StreamResult[]> {
   const results: StreamResult[] = [];
   try {
@@ -372,11 +374,14 @@ async function resolveEmbedsportsTop(sources: { source: string; id: string }[]):
           if (m3u8Match) m3u8Url = m3u8Match[0];
         } catch {}
 
+        // Source label shows provider name + server number from embedsports.top
+        const serverLabel = `${sourceLabel} S${server}`;
+
         if (m3u8Url) {
           results.push({
             id: `es-${provider}-${slug}-s${server}`, streamNo: results.length + 1,
             language: "English", hd: true, m3u8Url, quality: "HD",
-            source: `${sourceLabel} (EmbedSports S${server})`,
+            source: serverLabel,
             viewers: 0, provider: "embedsports", corsEnabled: false,
             referer: "https://embedsports.top/", embedUrl, streamType: "m3u8",
           });
@@ -385,7 +390,7 @@ async function resolveEmbedsportsTop(sources: { source: string; id: string }[]):
           results.push({
             id: `es-${provider}-${slug}-s${server}`, streamNo: results.length + 1,
             language: "English", hd: true, m3u8Url: "", quality: "HD",
-            source: `${sourceLabel} (EmbedSports S${server})`,
+            source: serverLabel,
             viewers: 0, provider: "embedsports", corsEnabled: false,
             referer: "https://embedsports.top/", embedUrl, streamType: "embed",
           });
