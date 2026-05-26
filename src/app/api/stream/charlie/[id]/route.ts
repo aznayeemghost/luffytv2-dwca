@@ -38,26 +38,29 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         streamType: "embed" as const,
       }));
 
-    // EmbedSports fallback — correct URL format: /embed/{provider}/{slug}/{server}
-    const seenEmbedUrls = new Set(results.map((r: any) => r.embedUrl));
-    for (let server = 1; server <= 2; server++) {
-      const embedsportsUrl = `https://embedsports.top/embed/${source}/${id}/${server}`;
-      if (seenEmbedUrls.has(embedsportsUrl)) continue;
-      results.push({
-        id: `es-${source}-${id}-s${server}`,
-        streamNo: results.length + 1,
-        language: "English",
-        hd: true,
-        m3u8Url: "",
-        quality: "HD",
-        source: `Charlie (EmbedSports S${server})`,
-        viewers: 0,
-        provider: "embedsports",
-        corsEnabled: false,
-        referer: "https://embedsports.top/",
-        embedUrl: embedsportsUrl,
-        streamType: "embed" as const,
-      });
+    // EmbedSports fallback — ONLY if StreamedPK API returned streams for this provider
+    // This prevents showing broken streams for providers that don't have this match
+    if (results.length > 0) {
+      const seenEmbedUrls = new Set(results.map((r: any) => r.embedUrl));
+      for (let server = 1; server <= 2; server++) {
+        const embedsportsUrl = `https://embedsports.top/embed/${source}/${id}/${server}`;
+        if (seenEmbedUrls.has(embedsportsUrl)) continue;
+        results.push({
+          id: `es-${source}-${id}-s${server}`,
+          streamNo: results.length + 1,
+          language: "English",
+          hd: true,
+          m3u8Url: "",
+          quality: "HD",
+          source: `Charlie (EmbedSports S${server})`,
+          viewers: 0,
+          provider: "embedsports",
+          corsEnabled: false,
+          referer: "https://embedsports.top/",
+          embedUrl: embedsportsUrl,
+          streamType: "embed" as const,
+        });
+      }
     }
 
     return NextResponse.json({ streams: results, total: results.length, source });

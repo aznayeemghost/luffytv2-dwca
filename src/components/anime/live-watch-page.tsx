@@ -327,23 +327,21 @@ export default function LiveWatchPage(props: LiveWatchProps) {
           }
         }
 
-        // ALSO fetch from individual StreamedPK provider routes (Alpha-Intel)
-        // This ensures ALL 9 StreamedPK sources appear even when the embed route misses them
+        // ALSO fetch from individual StreamedPK provider routes
+        // ONLY for providers that the match actually has — don't fetch providers
+        // that don't have this match (prevents showing broken/non-working streams)
         let providerStreams: StreamInfo[] = [];
         try {
           const matchSources: { source: string; id: string }[] = props.matchSources
             ? JSON.parse(props.matchSources) : [];
-          // Extract the StreamedPK match ID from sources array
+          // ONLY use sources that the match actually has — no fallback to all providers
           const spSourceIds = matchSources.filter(s => s.source && s.id);
           if (spSourceIds.length > 0) {
-            // Call each individual provider route in parallel
-            const providers = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "intel"];
-            const providerFetches = providers.map(async (prov) => {
+            // ONLY call provider routes for providers that have this match
+            const providerFetches = spSourceIds.map(async (src) => {
               try {
-                // Find the matching source ID for this provider
-                const matchingSource = spSourceIds.find(s => s.source.toLowerCase() === prov);
-                // Use the specific ID for this provider, or fall back to the first source's ID
-                const streamId = matchingSource?.id || spSourceIds[0]?.id || props.matchId;
+                const prov = src.source.toLowerCase();
+                const streamId = src.id;
                 const category = props.matchStreamCategory || props.matchSportsrcCategory || "sports";
                 const provRes = await fetch(`/api/stream/${prov}/${encodeURIComponent(streamId)}?category=${encodeURIComponent(category)}`);
                 if (provRes.ok) {

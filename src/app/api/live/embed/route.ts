@@ -430,59 +430,34 @@ export async function GET(req: Request) {
     triedProviders.add("watchfooty");
   }
 
-  // Provider 4: StreamedPK — ALWAYS try ALL 10 sources for maximum coverage
-  // First, try with the parsed sources array from the match data
+  // Provider 4: StreamedPK — ONLY try sources that the match actually has
+  // Do NOT generate fake sources for providers that don't have this match
+  // This prevents showing broken/non-working streams on the watch page
   if (parsedSources.length > 0) {
     resolvePromises.push(resolveStreamedPK(parsedSources));
     triedProviders.add("streamed");
   }
-  // ALWAYS also try StreamedPK with ALL 10 sources using matchId as fallback
-  // This ensures we catch streams even when sources array is empty or wrong format
-  if (matchId) {
-    const spSources = [
-      { source: "admin", id: cleanMatchId },
-      { source: "echo", id: cleanMatchId },
-      { source: "delta", id: cleanMatchId },
-      { source: "bravo", id: cleanMatchId },
-      { source: "alpha", id: cleanMatchId },
-      { source: "charlie", id: cleanMatchId },
-      { source: "foxtrot", id: cleanMatchId },
-      { source: "golf", id: cleanMatchId },
-      { source: "hotel", id: cleanMatchId },
-      { source: "intel", id: cleanMatchId },
-    ];
-    // Only add sources that aren't already in parsedSources
-    const existingKeys = new Set(parsedSources.map(s => `${s.source}:${s.id}`));
-    const newSources = spSources.filter(s => !existingKeys.has(`${s.source}:${s.id}`));
-    if (newSources.length > 0) {
-      resolvePromises.push(resolveStreamedPK(newSources));
-      triedProviders.add("streamed");
-    }
-  }
 
-  // Provider 5 & 6: sportsembed.su + embedsports.top — ALWAYS try
+  // Provider 5: sportsembed.su — try if we have a category/matchId
   const sportsrcCategory = url.searchParams.get("sportsrcCategory") || streamCategory || "sports";
   const sportsrcId = url.searchParams.get("sportsrcId") || matchId || "";
   if (sportsrcId) {
     resolvePromises.push(resolveSportsembedSu(sportsrcCategory, sportsrcId));
     triedProviders.add("sportsembed");
   }
-  // EmbedSports: ALWAYS try — use parsedSources if available, otherwise all providers
-  // parsedSources has the correct provider+slug pairs from StreamedPK match data
-  // Fallback: try all 10 providers with cleaned matchId
-  const embedsportsSources = parsedSources.length > 0
-    ? parsedSources
-    : STREAMED_SOURCES.map(s => ({ source: s, id: cleanMatchId }));
-  resolvePromises.push(resolveEmbedsportsTop(embedsportsSources));
-  triedProviders.add("embedsports");
+  // Provider 6: EmbedSports — ONLY for providers the match actually has
+  // Do NOT generate EmbedSports URLs for providers that don't have this match
+  // This prevents showing broken streams on the watch page
+  if (parsedSources.length > 0) {
+    resolvePromises.push(resolveEmbedsportsTop(parsedSources));
+    triedProviders.add("embedsports");
+  }
 
-  // Fallback: if no providers matched at all, try everything with matchId
+  // Fallback: if no providers matched at all, try DamiTV and sportsembed only
+  // Do NOT generate fake StreamedPK/EmbedSports sources for all providers
   if (resolvePromises.length === 0 && matchId) {
-    const fallbackSources = STREAMED_SOURCES.map(s => ({ source: s, id: cleanMatchId }));
     resolvePromises.push(resolveDamiTV(cleanMatchId));
-    resolvePromises.push(resolveStreamedPK(fallbackSources));
     resolvePromises.push(resolveSportsembedSu("sports", cleanMatchId));
-    resolvePromises.push(resolveEmbedsportsTop(fallbackSources));
   }
 
   const allResults = await Promise.all(resolvePromises);

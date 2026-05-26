@@ -57,93 +57,97 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
   } catch {}
 
-  // ── SOURCE 2: EmbedSports direct fallback ──
-  // URL format: embedsports.top/embed/{provider}/{slug}/{server_number}
-  // The id from StreamedPK sources IS the slug for EmbedSports
-  // Echo has servers 1-4
-  try {
-    for (let server = 1; server <= 4; server++) {
-      const embedsportsUrl = `https://embedsports.top/embed/${source}/${id}/${server}`;
-      if (seenEmbedUrls.has(embedsportsUrl)) continue; // Skip if StreamedPK already returned this URL
+  // ── SOURCES 2-4: Only add fallback sources if StreamedPK confirmed this match exists ──
+  // This prevents showing broken streams for providers that don't have this match
+  if (results.length > 0) {
+    // ── SOURCE 2: EmbedSports direct fallback ──
+    // URL format: embedsports.top/embed/{provider}/{slug}/{server_number}
+    // The id from StreamedPK sources IS the slug for EmbedSports
+    // Echo has servers 1-4
+    try {
+      for (let server = 1; server <= 4; server++) {
+        const embedsportsUrl = `https://embedsports.top/embed/${source}/${id}/${server}`;
+        if (seenEmbedUrls.has(embedsportsUrl)) continue; // Skip if StreamedPK already returned this URL
+        results.push({
+          id: `es-${source}-${id}-s${server}`,
+          streamNo: results.length + 1,
+          language: "English",
+          hd: true,
+          m3u8Url: "",
+          quality: "HD",
+          source: `Echo (EmbedSports Server ${server})`,
+          viewers: 0,
+          provider: "embedsports",
+          corsEnabled: false,
+          referer: "https://embedsports.top/",
+          embedUrl: embedsportsUrl,
+          streamType: "embed",
+        });
+      }
+    } catch {}
+
+    // ── SOURCE 3: streamfree.app (Echo = streamfree embed) ──
+    try {
+      const streamfreeEmbedUrl = `https://streamfree.app/embed/${category}/${id}`;
       results.push({
-        id: `es-${source}-${id}-s${server}`,
+        id: `sf-embed-${id}`,
+        streamNo: results.length + 1,
+        language: "English",
+        hd: true,
+        m3u8Url: "",
+        quality: "720p",
+        source: "Echo (StreamFree)",
+        viewers: 0,
+        provider: "streamfree",
+        corsEnabled: false,
+        referer: "https://streamfree.app/",
+        embedUrl: streamfreeEmbedUrl,
+        streamType: "embed",
+      });
+
+      // Try to extract M3U8 from streamfree embed page
+      try {
+        const html = await GEThtml(streamfreeEmbedUrl, { Referer: "https://streamfree.app/" });
+        const m3u8Match = html.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/);
+        if (m3u8Match) {
+          results.push({
+            id: `sf-m3u8-${id}`,
+            streamNo: results.length + 1,
+            language: "English",
+            hd: true,
+            m3u8Url: m3u8Match[0],
+            quality: "720p",
+            source: "Echo (StreamFree HLS)",
+            viewers: 0,
+            provider: "streamfree",
+            corsEnabled: true,
+            referer: "https://streamfree.app/",
+            streamType: "m3u8",
+          });
+        }
+      } catch {}
+    } catch {}
+
+    // ── SOURCE 4: SportsEmbed ──
+    try {
+      const seUrl = `https://sportsembed.su/embed/${category}/${id}`;
+      results.push({
+        id: `se-embed-${id}`,
         streamNo: results.length + 1,
         language: "English",
         hd: true,
         m3u8Url: "",
         quality: "HD",
-        source: `Echo (EmbedSports Server ${server})`,
+        source: "Echo (SportsEmbed)",
         viewers: 0,
-        provider: "embedsports",
+        provider: "sportsembed",
         corsEnabled: false,
-        referer: "https://embedsports.top/",
-        embedUrl: embedsportsUrl,
+        referer: "https://sportsembed.su/",
+        embedUrl: seUrl,
         streamType: "embed",
       });
-    }
-  } catch {}
-
-  // ── SOURCE 3: streamfree.app (Echo = streamfree embed) ──
-  try {
-    const streamfreeEmbedUrl = `https://streamfree.app/embed/${category}/${id}`;
-    results.push({
-      id: `sf-embed-${id}`,
-      streamNo: results.length + 1,
-      language: "English",
-      hd: true,
-      m3u8Url: "",
-      quality: "720p",
-      source: "Echo (StreamFree)",
-      viewers: 0,
-      provider: "streamfree",
-      corsEnabled: false,
-      referer: "https://streamfree.app/",
-      embedUrl: streamfreeEmbedUrl,
-      streamType: "embed",
-    });
-
-    // Try to extract M3U8 from streamfree embed page
-    try {
-      const html = await GEThtml(streamfreeEmbedUrl, { Referer: "https://streamfree.app/" });
-      const m3u8Match = html.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/);
-      if (m3u8Match) {
-        results.push({
-          id: `sf-m3u8-${id}`,
-          streamNo: results.length + 1,
-          language: "English",
-          hd: true,
-          m3u8Url: m3u8Match[0],
-          quality: "720p",
-          source: "Echo (StreamFree HLS)",
-          viewers: 0,
-          provider: "streamfree",
-          corsEnabled: true,
-          referer: "https://streamfree.app/",
-          streamType: "m3u8",
-        });
-      }
     } catch {}
-  } catch {}
-
-  // ── SOURCE 4: SportsEmbed ──
-  try {
-    const seUrl = `https://sportsembed.su/embed/${category}/${id}`;
-    results.push({
-      id: `se-embed-${id}`,
-      streamNo: results.length + 1,
-      language: "English",
-      hd: true,
-      m3u8Url: "",
-      quality: "HD",
-      source: "Echo (SportsEmbed)",
-      viewers: 0,
-      provider: "sportsembed",
-      corsEnabled: false,
-      referer: "https://sportsembed.su/",
-      embedUrl: seUrl,
-      streamType: "embed",
-    });
-  } catch {}
+  }
 
   // Sort: StreamedPK embeds first (most reliable), then other embeds, then M3U8
   results.sort((a, b) => {
