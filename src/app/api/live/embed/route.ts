@@ -417,21 +417,36 @@ export async function GET(req: Request) {
     triedProviders.add("watchfooty");
   }
 
-  // Provider 4: StreamedPK — ALWAYS try with parsed sources AND fallback sources
+  // Provider 4: StreamedPK — ALWAYS try ALL 10 sources for maximum coverage
+  // First, try with the parsed sources array from the match data
   if (parsedSources.length > 0) {
     resolvePromises.push(resolveStreamedPK(parsedSources));
     triedProviders.add("streamed");
   }
-  // Also try StreamedPK with common sources using matchId as fallback
-  if (matchId && parsedSources.length === 0) {
-    resolvePromises.push(resolveStreamedPK([
-      { source: "admin", id: matchId },
-      { source: "echo", id: matchId },
-      { source: "delta", id: matchId },
-      { source: "bravo", id: matchId },
-      { source: "alpha", id: matchId },
-    ]));
-    triedProviders.add("streamed");
+  // ALWAYS also try StreamedPK with ALL 10 sources using matchId as fallback
+  // This ensures we catch streams even when sources array is empty or wrong format
+  if (matchId) {
+    // Strip any prefix like "espn-", "wf-", "sp-" from matchId for StreamedPK
+    const cleanId = matchId.replace(/^(espn|wf|sp|sf|cdn|dami|se|es)-/i, "");
+    const spSources = [
+      { source: "admin", id: cleanId },
+      { source: "echo", id: cleanId },
+      { source: "delta", id: cleanId },
+      { source: "bravo", id: cleanId },
+      { source: "alpha", id: cleanId },
+      { source: "charlie", id: cleanId },
+      { source: "foxtrot", id: cleanId },
+      { source: "golf", id: cleanId },
+      { source: "hotel", id: cleanId },
+      { source: "intel", id: cleanId },
+    ];
+    // Only add sources that aren't already in parsedSources
+    const existingKeys = new Set(parsedSources.map(s => `${s.source}:${s.id}`));
+    const newSources = spSources.filter(s => !existingKeys.has(`${s.source}:${s.id}`));
+    if (newSources.length > 0) {
+      resolvePromises.push(resolveStreamedPK(newSources));
+      triedProviders.add("streamed");
+    }
   }
 
   // Provider 5 & 6: sportsembed.su + embedsports.top — ALWAYS try
@@ -446,14 +461,11 @@ export async function GET(req: Request) {
 
   // Fallback: if no providers matched at all, try everything with matchId
   if (resolvePromises.length === 0 && matchId) {
-    resolvePromises.push(resolveDamiTV(matchId));
-    resolvePromises.push(resolveStreamedPK([
-      { source: "admin", id: matchId },
-      { source: "echo", id: matchId },
-      { source: "delta", id: matchId },
-    ]));
-    resolvePromises.push(resolveSportsembedSu("sports", matchId));
-    resolvePromises.push(resolveEmbedsportsTop("sports", matchId));
+    const cleanId = matchId.replace(/^(espn|wf|sp|sf|cdn|dami|se|es)-/i, "");
+    resolvePromises.push(resolveDamiTV(cleanId));
+    resolvePromises.push(resolveStreamedPK(STREAMED_SOURCES.map(s => ({ source: s, id: cleanId }))));
+    resolvePromises.push(resolveSportsembedSu("sports", cleanId));
+    resolvePromises.push(resolveEmbedsportsTop("sports", cleanId));
   }
 
   const allResults = await Promise.all(resolvePromises);

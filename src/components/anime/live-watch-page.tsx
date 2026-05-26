@@ -211,7 +211,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
     } catch { return []; }
   }, [props.matchWatchfootyStreams]);
 
-  // Fetch stream URLs from our resolver API
+  // Fetch stream URLs from our resolver API + individual provider routes
   useEffect(() => {
     if (!props.matchId) return;
     const fetchStreams = async () => {
@@ -236,7 +236,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
             streamType: "embed" as const,
           }));
 
-        // Also fetch from resolver API for other sources
+        // Fetch from main resolver API (streamfree, cdnlivetv, dami-tv, watchfooty, sportsembed, embedsports)
         const params = new URLSearchParams();
         params.set("matchId", props.matchId);
         params.set("provider", props.matchApiSource || "");
@@ -259,10 +259,41 @@ export default function LiveWatchPage(props: LiveWatchProps) {
           }
         }
 
-        // Merge: WatchFooty direct streams first, then resolver streams
-        const allStreams = [...wfStreams, ...resolverStreams];
+        // ALSO fetch from individual StreamedPK provider routes (Alpha-Intel)
+        // This ensures ALL 9 StreamedPK sources appear even when the embed route misses them
+        let providerStreams: StreamInfo[] = [];
+        try {
+          const matchSources: { source: string; id: string }[] = props.matchSources
+            ? JSON.parse(props.matchSources) : [];
+          // Extract the StreamedPK match ID from sources array
+          const spSourceIds = matchSources.filter(s => s.source && s.id);
+          if (spSourceIds.length > 0) {
+            // Call each individual provider route in parallel
+            const providers = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "intel"];
+            const providerFetches = providers.map(async (prov) => {
+              try {
+                // Find the matching source ID for this provider
+                const matchingSource = spSourceIds.find(s => s.source.toLowerCase() === prov);
+                // Use the specific ID for this provider, or fall back to the first source's ID
+                const streamId = matchingSource?.id || spSourceIds[0]?.id || props.matchId;
+                const category = props.matchStreamCategory || props.matchSportsrcCategory || "sports";
+                const provRes = await fetch(`/api/stream/${prov}/${encodeURIComponent(streamId)}?category=${encodeURIComponent(category)}`);
+                if (provRes.ok) {
+                  const provData = await provRes.json();
+                  return Array.isArray(provData.streams) ? provData.streams : [];
+                }
+              } catch {}
+              return [];
+            });
+            const providerResults = await Promise.all(providerFetches);
+            providerStreams = providerResults.flat();
+          }
+        } catch {}
 
-        // Deduplicate by embedUrl
+        // Merge: WatchFooty direct + resolver + individual provider streams
+        const allStreams = [...wfStreams, ...resolverStreams, ...providerStreams];
+
+        // Deduplicate by embedUrl / m3u8Url
         const seen = new Set<string>();
         const uniqueStreams = allStreams.filter(s => {
           const key = s.streamType === "m3u8" && s.m3u8Url ? s.m3u8Url : (s.embedUrl || s.id);
@@ -280,7 +311,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
           // Embed streams auto-play in iframe, so prefer those for instant playback
           const best = embedStream || corsStream || m3u8Stream || uniqueStreams[0];
           setActiveStream(best);
-        } else if (wfStreams.length === 0 && resolverStreams.length === 0) {
+        } else if (wfStreams.length === 0 && resolverStreams.length === 0 && providerStreams.length === 0) {
           // No streams at all
           if (isUpcoming) setPlayerState("countdown");
           else if (hasTeams) setPlayerState("scoreboard");

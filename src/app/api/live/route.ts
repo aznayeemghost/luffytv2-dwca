@@ -625,6 +625,12 @@ function pickMissing(base: LiveMatch, fill: LiveMatch): Partial<LiveMatch> {
   if (fill.popular) result.popular = true;
   if (fill.isLive) result.isLive = true;
   if (base.sources.length === 0 && fill.sources.length > 0) result.sources = fill.sources;
+  // ALSO merge additional sources from fill into base (don't lose StreamedPK sources!)
+  else if (fill.sources.length > 0) {
+    const existingKeys = new Set(base.sources.map(s => `${s.source}:${s.id}`));
+    const newSources = fill.sources.filter(s => !existingKeys.has(`${s.source}:${s.id}`));
+    if (newSources.length > 0) result.sources = [...base.sources, ...newSources];
+  }
   // WatchFooty fields — prefer WatchFooty data for scores, streams, league
   if (!base.watchfootyStreams && fill.watchfootyStreams && fill.watchfootyStreams.length > 0) result.watchfootyStreams = fill.watchfootyStreams;
   if (!base.league && fill.league) result.league = fill.league;
@@ -633,6 +639,12 @@ function pickMissing(base: LiveMatch, fill: LiveMatch): Partial<LiveMatch> {
   if (base.awayScore === undefined && fill.awayScore !== undefined) result.awayScore = fill.awayScore;
   if (!base.currentMinute && fill.currentMinute) result.currentMinute = fill.currentMinute;
   if (!base.watchfootyId && fill.watchfootyId) result.watchfootyId = fill.watchfootyId;
+  // Also pick missing DamiTV and SportsEmbed IDs
+  if (!base.damitvId && fill.damitvId) result.damitvId = fill.damitvId;
+  if (!base.sportsrcCategory && fill.sportsrcCategory) result.sportsrcCategory = fill.sportsrcCategory;
+  if (!base.sportsrcId && fill.sportsrcId) result.sportsrcId = fill.sportsrcId;
+  if (!base.channelCode && fill.channelCode) result.channelCode = fill.channelCode;
+  if (!base.channelName && fill.channelName) result.channelName = fill.channelName;
   return result;
 }
 
