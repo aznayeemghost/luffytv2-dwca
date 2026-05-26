@@ -244,7 +244,7 @@ async function fetchWatchfootyLive(): Promise<LiveMatch[]> {
         awayTeam: m.teams?.away?.name || "",
         homeBadge: m.teams?.home?.logoUrl ? (m.teams.home.logoUrl.startsWith("http") ? m.teams.home.logoUrl : `${WF_BASE}${m.teams.home.logoUrl}`) : (m.teams?.home?.logo ? (m.teams.home.logo.startsWith("http") ? m.teams.home.logo : `${WF_BASE}${m.teams.home.logo}`) : ""),
         awayBadge: m.teams?.away?.logoUrl ? (m.teams.away.logoUrl.startsWith("http") ? m.teams.away.logoUrl : `${WF_BASE}${m.teams.away.logoUrl}`) : (m.teams?.away?.logo ? (m.teams.away.logo.startsWith("http") ? m.teams.away.logo : `${WF_BASE}${m.teams.away.logo}`) : ""),
-        isLive: m.status === "in" || m.status === "live",
+        isLive: true, // This endpoint ONLY returns matches that are currently live
         apiSource: "watchfooty",
         sources: [],
         watchfootyId: m.matchId,
@@ -289,7 +289,7 @@ async function fetchWatchfootyAll(): Promise<LiveMatch[]> {
         awayTeam: m.teams?.away?.name || "",
         homeBadge: m.teams?.home?.logoUrl ? (m.teams.home.logoUrl.startsWith("http") ? m.teams.home.logoUrl : `${WF_BASE}${m.teams.home.logoUrl}`) : (m.teams?.home?.logo ? (m.teams.home.logo.startsWith("http") ? m.teams.home.logo : `${WF_BASE}${m.teams.home.logo}`) : ""),
         awayBadge: m.teams?.away?.logoUrl ? (m.teams.away.logoUrl.startsWith("http") ? m.teams.away.logoUrl : `${WF_BASE}${m.teams.away.logoUrl}`) : (m.teams?.away?.logo ? (m.teams.away.logo.startsWith("http") ? m.teams.away.logo : `${WF_BASE}${m.teams.away.logo}`) : ""),
-        isLive: m.status === "in" || m.status === "live",
+        isLive: m.status === "in" || m.status === "live" || m.status === "1" || m.status === "2" || m.status === "HT" || m.status === "Q1" || m.status === "Q2" || m.status === "Q3" || m.status === "Q4" || m.status === "LIVE",
         apiSource: "watchfooty",
         sources: [],
         watchfootyId: m.matchId,
@@ -334,7 +334,7 @@ async function fetchWatchfootyPopularLive(): Promise<LiveMatch[]> {
         awayTeam: m.teams?.away?.name || "",
         homeBadge: m.teams?.home?.logoUrl ? (m.teams.home.logoUrl.startsWith("http") ? m.teams.home.logoUrl : `${WF_BASE}${m.teams.home.logoUrl}`) : (m.teams?.home?.logo ? (m.teams.home.logo.startsWith("http") ? m.teams.home.logo : `${WF_BASE}${m.teams.home.logo}`) : ""),
         awayBadge: m.teams?.away?.logoUrl ? (m.teams.away.logoUrl.startsWith("http") ? m.teams.away.logoUrl : `${WF_BASE}${m.teams.away.logoUrl}`) : (m.teams?.away?.logo ? (m.teams.away.logo.startsWith("http") ? m.teams.away.logo : `${WF_BASE}${m.teams.away.logo}`) : ""),
-        isLive: m.status === "in" || m.status === "live",
+        isLive: true, // This endpoint ONLY returns popular LIVE matches
         apiSource: "watchfooty",
         sources: [],
         watchfootyId: m.matchId,
@@ -421,7 +421,7 @@ async function fetchWatchfootyPopular(): Promise<LiveMatch[]> {
         awayTeam: m.teams?.away?.name || "",
         homeBadge: m.teams?.home?.logoUrl ? (m.teams.home.logoUrl.startsWith("http") ? m.teams.home.logoUrl : `${WF_BASE}${m.teams.home.logoUrl}`) : (m.teams?.home?.logo ? (m.teams.home.logo.startsWith("http") ? m.teams.home.logo : `${WF_BASE}${m.teams.home.logo}`) : ""),
         awayBadge: m.teams?.away?.logoUrl ? (m.teams.away.logoUrl.startsWith("http") ? m.teams.away.logoUrl : `${WF_BASE}${m.teams.away.logoUrl}`) : (m.teams?.away?.logo ? (m.teams.away.logo.startsWith("http") ? m.teams.away.logo : `${WF_BASE}${m.teams.away.logo}`) : ""),
-        isLive: m.status === "in" || m.status === "live",
+        isLive: m.status === "in" || m.status === "live" || m.status === "1" || m.status === "2" || m.status === "HT" || m.status === "Q1" || m.status === "Q2" || m.status === "Q3" || m.status === "Q4" || m.status === "LIVE",
         apiSource: "watchfooty",
         sources: [],
         watchfootyId: m.matchId,
@@ -755,7 +755,8 @@ export async function GET(req: Request) {
       // ESPN explicitly checks competition status type === "in"
       // WatchFooty explicitly checks m.status === "in" or "live"
       const confirmedByEspn = m.apiSource === "espn";
-      const confirmedByWatchfooty = m.apiSource === "watchfooty" && m.currentMinute;
+      // WatchFooty /live and /popular/live endpoints are authoritative — they ONLY return live matches
+      const confirmedByWatchfooty = m.apiSource === "watchfooty";
       // DamiTV always_live channels are 24/7 — keep them
       const isAlwaysLiveChannel = m.apiSource === "damitv" && !m.homeTeam && !m.awayTeam;
       if (!confirmedByEspn && !confirmedByWatchfooty && !isAlwaysLiveChannel) {
