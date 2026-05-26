@@ -350,6 +350,7 @@ async function resolveSportsembedSu(category: string, matchId: string): Promise<
 //   admin: embedsports.top/embed/admin/ppv-tampa-bay-rays-vs-baltimore-orioles/1
 //   golf: embedsports.top/embed/golf/22675/1
 // The slug is the same as the StreamedPK source ID for each provider
+// STRATEGY: Try M3U8 extraction first (like GitHub commit bd254ef), then embed fallback
 async function resolveEmbedsportsTop(sources: { source: string; id: string }[]): Promise<StreamResult[]> {
   const results: StreamResult[] = [];
   try {
@@ -357,18 +358,78 @@ async function resolveEmbedsportsTop(sources: { source: string; id: string }[]):
     for (const src of sources) {
       const provider = src.source.toLowerCase();
       const slug = src.id;
+      const sourceLabel = src.source.charAt(0).toUpperCase() + src.source.slice(1);
       // Each provider typically has 1-4 servers; echo has up to 4, others usually 1-2
       const maxServers = provider === "echo" ? 4 : 2;
       for (let server = 1; server <= maxServers; server++) {
         const embedUrl = `https://embedsports.top/embed/${provider}/${slug}/${server}`;
-        results.push({
-          id: `es-${provider}-${slug}-s${server}`, streamNo: results.length + 1,
-          language: "English", hd: true, m3u8Url: "", quality: "HD",
-          source: `${src.source.charAt(0).toUpperCase() + src.source.slice(1)} (EmbedSports S${server})`,
-          viewers: 0, provider: "embedsports", corsEnabled: false,
-          referer: "https://embedsports.top/", embedUrl, streamType: "embed",
-        });
+        
+        // Try M3U8 extraction first (server-side fetch, like GitHub commit)
+        let m3u8Url = "";
+        try {
+          const html = await GEThtml(embedUrl, { Referer: "https://embedsports.top/" });
+          const m3u8Match = html.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/);
+          if (m3u8Match) m3u8Url = m3u8Match[0];
+        } catch {}
+
+        if (m3u8Url) {
+          results.push({
+            id: `es-${provider}-${slug}-s${server}`, streamNo: results.length + 1,
+            language: "English", hd: true, m3u8Url, quality: "HD",
+            source: `${sourceLabel} (EmbedSports S${server})`,
+            viewers: 0, provider: "embedsports", corsEnabled: false,
+            referer: "https://embedsports.top/", embedUrl, streamType: "m3u8",
+          });
+        } else {
+          // Embed fallback — will be played via iframe
+          results.push({
+            id: `es-${provider}-${slug}-s${server}`, streamNo: results.length + 1,
+            language: "English", hd: true, m3u8Url: "", quality: "HD",
+            source: `${sourceLabel} (EmbedSports S${server})`,
+            viewers: 0, provider: "embedsports", corsEnabled: false,
+            referer: "https://embedsports.top/", embedUrl, streamType: "embed",
+          });
+        }
       }
+    }
+  } catch {}
+  return results;
+}
+
+// ── PROVIDER 7b: embedsports.top (category/matchId format from API events) ──
+// This resolves matches that came from the embedsports.top API events endpoint
+// URL format: embedsports.top/embed/{category}/{matchId}
+async function resolveEmbedsportsTopById(category: string, matchId: string): Promise<StreamResult[]> {
+  const results: StreamResult[] = [];
+  try {
+    const embedUrl = `https://embedsports.top/embed/${category}/${matchId}`;
+    // Try M3U8 extraction first
+    let m3u8Url = "";
+    try {
+      const html = await GEThtml(embedUrl, { Referer: "https://embedsports.top/" });
+      const m3u8Matches = html.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/g);
+      if (m3u8Matches) {
+        const seen = new Set<string>();
+        for (const url of m3u8Matches) {
+          if (seen.has(url)) continue; seen.add(url);
+          results.push({
+            id: `es-${category}-${matchId}-${results.length + 1}`, streamNo: results.length + 1,
+            language: "English", hd: results.length === 0, m3u8Url: url,
+            quality: results.length === 0 ? "720p" : "480p", source: "EmbedSports", viewers: 0,
+            provider: "embedsports", corsEnabled: false, referer: "https://embedsports.top/",
+            embedUrl, streamType: "m3u8",
+          });
+        }
+      }
+    } catch {}
+    // Always add embed fallback
+    if (results.length === 0) {
+      results.push({
+        id: `es-embed-${category}-${matchId}`, streamNo: 1,
+        language: "English", hd: true, m3u8Url: "", quality: "720p", source: "EmbedSports", viewers: 0,
+        provider: "embedsports", corsEnabled: false, referer: "https://embedsports.top/",
+        embedUrl, streamType: "embed",
+      });
     }
   } catch {}
   return results;
@@ -453,11 +514,17 @@ export async function GET(req: Request) {
     triedProviders.add("embedsports");
   }
 
-  // Fallback: if no providers matched at all, try DamiTV and sportsembed only
-  // Do NOT generate fake StreamedPK/EmbedSports sources for all providers
+  // Provider 6b: EmbedSports by category/matchId (for matches from embedsports API events)
+  if (sportsrcCategory && sportsrcId) {
+    resolvePromises.push(resolveEmbedsportsTopById(sportsrcCategory, sportsrcId));
+    triedProviders.add("embedsports-id");
+  }
+
+  // Fallback: if no providers matched at all, try DamiTV, sportsembed, and EmbedSports
   if (resolvePromises.length === 0 && matchId) {
     resolvePromises.push(resolveDamiTV(cleanMatchId));
     resolvePromises.push(resolveSportsembedSu("sports", cleanMatchId));
+    resolvePromises.push(resolveEmbedsportsTopById("sports", cleanMatchId));
   }
 
   const allResults = await Promise.all(resolvePromises);

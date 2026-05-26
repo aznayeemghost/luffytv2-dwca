@@ -39,27 +39,61 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       }));
 
     // EmbedSports fallback — ONLY if StreamedPK API returned streams for this provider
-    // This prevents showing broken streams for providers that don't have this match
+    // Try M3U8 extraction first (like GitHub commit bd254ef), then embed fallback
     if (results.length > 0) {
       const seenEmbedUrls = new Set(results.map((r: any) => r.embedUrl));
       for (let server = 1; server <= 2; server++) {
         const embedsportsUrl = `https://embedsports.top/embed/${source}/${id}/${server}`;
         if (seenEmbedUrls.has(embedsportsUrl)) continue;
-        results.push({
-          id: `es-${source}-${id}-s${server}`,
-          streamNo: results.length + 1,
-          language: "English",
-          hd: true,
-          m3u8Url: "",
-          quality: "HD",
-          source: `Foxtrot (EmbedSports S${server})`,
-          viewers: 0,
-          provider: "embedsports",
-          corsEnabled: false,
-          referer: "https://embedsports.top/",
-          embedUrl: embedsportsUrl,
-          streamType: "embed" as const,
-        });
+
+        // Try M3U8 extraction from embed page
+        let m3u8Url = "";
+        try {
+          const esRes = await fetch(embedsportsUrl, {
+            signal: AbortSignal.timeout(TIMEOUT),
+            headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml", Referer: "https://embedsports.top/" },
+          });
+          if (esRes.ok) {
+            const html = await esRes.text();
+            const m3u8Match = html.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/);
+            if (m3u8Match) m3u8Url = m3u8Match[0];
+          }
+        } catch {}
+
+        const sourceName = source.charAt(0).toUpperCase() + source.slice(1);
+        if (m3u8Url) {
+          results.push({
+            id: `es-${source}-${id}-s${server}`,
+            streamNo: results.length + 1,
+            language: "English",
+            hd: true,
+            m3u8Url,
+            quality: "HD",
+            source: `${sourceName} (EmbedSports S${server})`,
+            viewers: 0,
+            provider: "embedsports",
+            corsEnabled: false,
+            referer: "https://embedsports.top/",
+            embedUrl: embedsportsUrl,
+            streamType: "m3u8" as const,
+          });
+        } else {
+          results.push({
+            id: `es-${source}-${id}-s${server}`,
+            streamNo: results.length + 1,
+            language: "English",
+            hd: true,
+            m3u8Url: "",
+            quality: "HD",
+            source: `${sourceName} (EmbedSports S${server})`,
+            viewers: 0,
+            provider: "embedsports",
+            corsEnabled: false,
+            referer: "https://embedsports.top/",
+            embedUrl: embedsportsUrl,
+            streamType: "embed" as const,
+          });
+        }
       }
     }
 

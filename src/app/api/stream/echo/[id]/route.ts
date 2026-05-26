@@ -64,25 +64,53 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     // URL format: embedsports.top/embed/{provider}/{slug}/{server_number}
     // The id from StreamedPK sources IS the slug for EmbedSports
     // Echo has servers 1-4
+    // Try M3U8 extraction first (like GitHub commit bd254ef), then embed fallback
     try {
       for (let server = 1; server <= 4; server++) {
         const embedsportsUrl = `https://embedsports.top/embed/${source}/${id}/${server}`;
         if (seenEmbedUrls.has(embedsportsUrl)) continue; // Skip if StreamedPK already returned this URL
-        results.push({
-          id: `es-${source}-${id}-s${server}`,
-          streamNo: results.length + 1,
-          language: "English",
-          hd: true,
-          m3u8Url: "",
-          quality: "HD",
-          source: `Echo (EmbedSports Server ${server})`,
-          viewers: 0,
-          provider: "embedsports",
-          corsEnabled: false,
-          referer: "https://embedsports.top/",
-          embedUrl: embedsportsUrl,
-          streamType: "embed",
-        });
+        
+        // Try M3U8 extraction from embed page
+        let m3u8Url = "";
+        try {
+          const html = await GEThtml(embedsportsUrl, { Referer: "https://embedsports.top/" });
+          const m3u8Match = html.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/);
+          if (m3u8Match) m3u8Url = m3u8Match[0];
+        } catch {}
+
+        if (m3u8Url) {
+          results.push({
+            id: `es-${source}-${id}-s${server}`,
+            streamNo: results.length + 1,
+            language: "English",
+            hd: true,
+            m3u8Url,
+            quality: "HD",
+            source: `Echo (EmbedSports S${server})`,
+            viewers: 0,
+            provider: "embedsports",
+            corsEnabled: false,
+            referer: "https://embedsports.top/",
+            embedUrl: embedsportsUrl,
+            streamType: "m3u8",
+          });
+        } else {
+          results.push({
+            id: `es-${source}-${id}-s${server}`,
+            streamNo: results.length + 1,
+            language: "English",
+            hd: true,
+            m3u8Url: "",
+            quality: "HD",
+            source: `Echo (EmbedSports S${server})`,
+            viewers: 0,
+            provider: "embedsports",
+            corsEnabled: false,
+            referer: "https://embedsports.top/",
+            embedUrl: embedsportsUrl,
+            streamType: "embed",
+          });
+        }
       }
     } catch {}
 

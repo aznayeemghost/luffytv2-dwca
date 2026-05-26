@@ -740,7 +740,7 @@ export async function GET(req: Request) {
 
     // ── Time-based sanity check: unmark stale "live" matches ──
     // If a match was marked isLive but its start time was more than 5 hours ago
-    // AND no authoritative source (ESPN with status "in", WatchFooty with status "in")
+    // AND no authoritative source (ESPN with status "in", WatchFooty /live endpoint)
     // explicitly confirms it's still live, mark it as not live.
     // Most sports matches last 2-3 hours max; 5h gives extra buffer for delays/OT.
     const STALE_LIVE_THRESHOLD = 5 * 60 * 60 * 1000; // 5 hours
@@ -753,16 +753,46 @@ export async function GET(req: Request) {
       if (m.date > now - STALE_LIVE_THRESHOLD) continue;
       // Match started over 5 hours ago — only keep live if an authoritative source confirms it
       // ESPN explicitly checks competition status type === "in"
-      // WatchFooty explicitly checks m.status === "in" or "live"
       const confirmedByEspn = m.apiSource === "espn";
       // WatchFooty /live and /popular/live endpoints are authoritative — they ONLY return live matches
+      // These endpoints should NEVER be overridden by the time check
       const confirmedByWatchfooty = m.apiSource === "watchfooty";
       // DamiTV always_live channels are 24/7 — keep them
       const isAlwaysLiveChannel = m.apiSource === "damitv" && !m.homeTeam && !m.awayTeam;
-      if (!confirmedByEspn && !confirmedByWatchfooty && !isAlwaysLiveChannel) {
+      // StreamedPK explicitly marks live matches
+      const confirmedByStreamed = m.apiSource === "streamed" && m.isLive;
+      if (!confirmedByEspn && !confirmedByWatchfooty && !isAlwaysLiveChannel && !confirmedByStreamed) {
         m.isLive = false;
       }
     }
+
+    // ── Filter out matches that have NO stream availability ──
+    // If a match has no way to play it (no sources, no streamKey, no damitvId,
+    // no watchfootyId, no channelCode, no sportsrcCategory/sportsrcId), remove it
+    // Only filter for non-live matches that are NOT 24/7 TV channels
+    matches = matches.filter(m => {
+      // Always keep live matches — they might get streams from multiple providers
+      if (m.isLive) return true;
+      // Always keep popular matches
+      if (m.popular) return true;
+      // Always keep matches with any stream source
+      if (m.sources && m.sources.length > 0) return true;
+      if (m.streamKey) return true;
+      if (m.damitvId) return true;
+      if (m.watchfootyId) return true;
+      if (m.channelCode) return true;
+      if (m.sportsrcCategory && m.sportsrcId) return true;
+      if (m.watchfootyStreams && m.watchfootyStreams.length > 0) return true;
+      // For upcoming matches (future date), keep them even without sources
+      // They might get streams closer to match time
+      if (m.date && m.date > now) return true;
+      // For non-live matches that already started but have no sources, hide them
+      // unless they came from a source that might provide streams later
+      if (m.apiSource === "streamfree" || m.apiSource === "damitv" || 
+          m.apiSource === "sportsembed" || m.apiSource === "embedsports") return true;
+      // No stream sources and not from a provider that could provide them — hide
+      return false;
+    });
 
     // Filter by sport
     if (sport) {
