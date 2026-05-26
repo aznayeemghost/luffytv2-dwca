@@ -269,53 +269,44 @@ async function resolveWatchfooty(matchId: number): Promise<StreamResult[]> {
   return results;
 }
 
-// ── PROVIDER 5: streamed.pk → embedsports.top ──
-// KEY FIX: embedsports.top uses obfuscated JS — M3U8 extraction FAILS
-// So we return embed URLs as streamType "embed" for iframe playback
+// ── PROVIDER 5: streamed.pk — ALL 9 sources (alpha–intel) ──
+// The Streams API returns embedUrl for each stream — use directly in iframe!
+// No M3U8 extraction needed (it's slow and fails due to obfuscated JS)
+const STREAMED_SOURCES = ["admin", "delta", "golf", "echo", "bravo", "alpha", "charlie", "foxtrot", "hotel", "intel"] as const;
+const STREAMED_PRIORITY: Record<string, number> = { admin: 1, delta: 2, golf: 3, echo: 4, bravo: 5, alpha: 6, charlie: 7, foxtrot: 8, hotel: 9, intel: 10 };
+
 async function resolveStreamedPK(sources: { source: string; id: string }[]): Promise<StreamResult[]> {
   const results: StreamResult[] = [];
-  const sourcePriority: Record<string, number> = { admin: 1, delta: 2, golf: 3, echo: 4, bravo: 5, alpha: 6, charlie: 7, foxtrot: 8 };
 
-  for (const src of sources) {
+  // Fetch ALL sources in parallel for speed
+  const fetchPromises = sources.map(async (src) => {
+    const localResults: StreamResult[] = [];
     try {
       const data = await GETjson(`https://streamed.pk/api/stream/${src.source}/${encodeURIComponent(src.id)}`);
-      if (!Array.isArray(data)) continue;
+      if (!Array.isArray(data)) return localResults;
+
+      const sourceLabel = src.source.charAt(0).toUpperCase() + src.source.slice(1);
 
       for (const s of data) {
         if (!s.embedUrl) continue;
 
-        // Try M3U8 extraction first (works for some providers)
-        let m3u8Url = "";
-        try {
-          const embedHtml = await GEThtml(s.embedUrl, { Referer: "https://embedsports.top/" });
-          const m3u8Match = embedHtml.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/);
-          if (m3u8Match) m3u8Url = m3u8Match[0];
-        } catch {}
-
-        const sourceLabel = src.source.charAt(0).toUpperCase() + src.source.slice(1);
-
-        if (m3u8Url) {
-          results.push({
-            id: `sp-${src.source}-${s.streamNo}`, streamNo: s.streamNo || results.length + 1,
-            language: s.language || "English", hd: s.hd !== false, m3u8Url, quality: s.hd ? "HD" : "SD",
-            source: sourceLabel, viewers: s.viewers || 0, provider: "streamed",
-            corsEnabled: false, referer: "https://embedsports.top/", embedUrl: s.embedUrl, streamType: "m3u8",
-          });
-        } else {
-          // Embed fallback — will be played via iframe through /api/embed/proxy
-          results.push({
-            id: `sp-embed-${src.source}-${s.streamNo}`, streamNo: s.streamNo || results.length + 1,
-            language: s.language || "English", hd: s.hd !== false, m3u8Url: "", quality: s.hd ? "HD" : "SD",
-            source: sourceLabel, viewers: s.viewers || 0, provider: "streamed",
-            corsEnabled: false, referer: "https://embedsports.top/", embedUrl: s.embedUrl, streamType: "embed",
-          });
-        }
+        // Use embedUrl directly — no M3U8 extraction (it's slow and unreliable)
+        localResults.push({
+          id: `sp-${src.source}-${s.id || s.streamNo}`, streamNo: s.streamNo || localResults.length + 1,
+          language: s.language || "English", hd: s.hd !== false, m3u8Url: "", quality: s.hd ? "HD" : "SD",
+          source: sourceLabel, viewers: s.viewers || 0, provider: "streamed",
+          corsEnabled: false, referer: "https://streamed.pk/", embedUrl: s.embedUrl, streamType: "embed",
+        });
       }
     } catch {}
-  }
+    return localResults;
+  });
 
-  // Sort by source priority
-  results.sort((a, b) => (sourcePriority[a.source.toLowerCase()] || 50) - (sourcePriority[b.source.toLowerCase()] || 50));
+  const allResults = await Promise.all(fetchPromises);
+  for (const r of allResults) results.push(...r);
+
+  // Sort by source priority (best sources first)
+  results.sort((a, b) => (STREAMED_PRIORITY[a.source.toLowerCase()] || 50) - (STREAMED_PRIORITY[b.source.toLowerCase()] || 50));
   return results;
 }
 

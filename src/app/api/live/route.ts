@@ -266,7 +266,7 @@ async function fetchWatchfootyAll(): Promise<LiveMatch[]> {
   } catch { return []; }
 }
 
-// ── SOURCE 5: streamed.pk (backup) ──
+// ── SOURCE 5: streamed.pk (9 stream sources: alpha–intel) ──
 async function fetchStreamedPK(endpoint: string): Promise<LiveMatch[]> {
   try {
     const res = await httpGet(`https://streamed.pk${endpoint}`);
@@ -274,22 +274,28 @@ async function fetchStreamedPK(endpoint: string): Promise<LiveMatch[]> {
     const data = await res.json();
     if (!Array.isArray(data)) return [];
 
-    return data.map((m: any): LiveMatch => ({
-      id: `sp-${m.id || Math.random()}`,
-      title: m.title || "Match",
-      sport: m.category || "other",
-      sportName: SPORT_NAMES[m.category] || capitalize(m.category || "other"),
-      date: m.date || 0,
-      poster: m.poster ? `https://streamed.pk${m.poster}` : "",
-      popular: m.popular || false,
-      homeTeam: m.teams?.home?.name || "",
-      awayTeam: m.teams?.away?.name || "",
-      homeBadge: m.teams?.home?.badge ? `https://streamed.pk/api/images/badge/${m.teams.home.badge}.webp` : "",
-      awayBadge: m.teams?.away?.badge ? `https://streamed.pk/api/images/badge/${m.teams.away.badge}.webp` : "",
-      isLive: false,
-      apiSource: "streamed",
-      sources: Array.isArray(m.sources) ? m.sources.map((s: any) => ({ source: s.source || "", id: s.id || "" })) : [],
-    }));
+    return data.map((m: any): LiveMatch => {
+      // Build sources array from the match's available stream sources
+      const sources = Array.isArray(m.sources) ? m.sources.map((s: any) => ({ source: s.source || "", id: s.id || "" })) : [];
+      const isLiveEndpoint = endpoint.includes("/live");
+
+      return {
+        id: `sp-${m.id || Math.random()}`,
+        title: m.title || "Match",
+        sport: mapCategoryToSport(m.category || m.sport || "other"),
+        sportName: SPORT_NAMES[mapCategoryToSport(m.category || m.sport || "other")] || capitalize(m.category || "other"),
+        date: m.date ? (typeof m.date === "number" ? (m.date > 1e12 ? m.date : m.date * 1000) : new Date(m.date).getTime()) : 0,
+        poster: m.poster ? (m.poster.startsWith("http") ? m.poster : `https://streamed.pk${m.poster}`) : "",
+        popular: m.popular || false,
+        homeTeam: m.teams?.home?.name || m.home_team || extractTeam(m.title || "", 0),
+        awayTeam: m.teams?.away?.name || m.away_team || extractTeam(m.title || "", 1),
+        homeBadge: m.teams?.home?.badge ? (m.teams.home.badge.startsWith("http") ? m.teams.home.badge : `https://streamed.pk/api/images/badge/${m.teams.home.badge}.webp`) : (m.home_logo || ""),
+        awayBadge: m.teams?.away?.badge ? (m.teams.away.badge.startsWith("http") ? m.teams.away.badge : `https://streamed.pk/api/images/badge/${m.teams.away.badge}.webp`) : (m.away_logo || ""),
+        isLive: isLiveEndpoint || m.live || m.isLive || m.status === "live" || false,
+        apiSource: "streamed",
+        sources,
+      };
+    });
   } catch { return []; }
 }
 
@@ -496,7 +502,7 @@ export async function GET(req: Request) {
 
   try {
     // Fetch from ALL sources in parallel
-    const [streamfree, cdnChannels, cdnSports, damitv, wfLive, wfAll, streamedLive, streamedToday, espn, sportsembed, embedsports] = await Promise.allSettled([
+    const [streamfree, cdnChannels, cdnSports, damitv, wfLive, wfAll, streamedLive, streamedToday, streamedUpcoming, espn, sportsembed, embedsports] = await Promise.allSettled([
       fetchStreamfreeStreams(),
       mode === "tv" ? fetchCDNLivetvChannels() : Promise.resolve([]),
       fetchCDNLivetvSports(),
@@ -505,6 +511,7 @@ export async function GET(req: Request) {
       fetchWatchfootyAll(),
       fetchStreamedPK("/api/matches/live"),
       fetchStreamedPK("/api/matches/all-today"),
+      fetchStreamedPK("/api/matches/upcoming"),
       fetchESPNMatches(),
       fetchSportsembedSu(),
       fetchEmbedsportsTop(),
@@ -519,6 +526,7 @@ export async function GET(req: Request) {
       wfAll.status === "fulfilled" ? wfAll.value : [],
       streamedLive.status === "fulfilled" ? streamedLive.value : [],
       streamedToday.status === "fulfilled" ? streamedToday.value : [],
+      streamedUpcoming.status === "fulfilled" ? streamedUpcoming.value : [],
       espn.status === "fulfilled" ? espn.value : [],
       sportsembed.status === "fulfilled" ? sportsembed.value : [],
       embedsports.status === "fulfilled" ? embedsports.value : [],
