@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 
-// Intel Stream Provider — StreamedPK Intel + EmbedSports fallback
-// GET /api/stream/intel/[id]
+// Admin Stream Provider — StreamedPK Admin + EmbedSports fallback
+// GET /api/stream/admin/[id]
+// StreamedPK API returns embedUrl fields that point to EmbedSports with correct URL format
+// Admin is the PRIMARY source for PPV/premium matches (IPL, big events)
 export const runtime = "edge";
 
 const TIMEOUT = 12000;
@@ -9,7 +11,7 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const source = "intel";
+  const source = "admin";
 
   try {
     const res = await fetch(`https://streamed.pk/api/stream/${source}/${encodeURIComponent(id)}`, {
@@ -29,7 +31,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         hd: s.hd !== false,
         m3u8Url: "",
         quality: s.hd ? "HD" : "SD",
-        source: `Intel S${s.streamNo || i + 1}`,
+        source: `Admin S${s.streamNo || i + 1}`,
         viewers: s.viewers || 0,
         provider: "streamed",
         corsEnabled: false,
@@ -39,7 +41,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       }));
 
     // EmbedSports fallback — ONLY if StreamedPK API returned streams for this provider
-    // Try M3U8 extraction first (like GitHub commit bd254ef), then embed fallback
     if (results.length > 0) {
       const seenEmbedUrls = new Set(results.map((r: any) => r.embedUrl));
       for (let server = 1; server <= 2; server++) {
@@ -49,18 +50,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         // Try M3U8 extraction from embed page
         let m3u8Url = "";
         try {
-          const esRes = await fetch(embedsportsUrl, {
+          const res = await fetch(embedsportsUrl, {
             signal: AbortSignal.timeout(TIMEOUT),
             headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml", Referer: "https://embedsports.top/" },
           });
-          if (esRes.ok) {
-            const html = await esRes.text();
+          if (res.ok) {
+            const html = await res.text();
             const m3u8Match = html.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/);
             if (m3u8Match) m3u8Url = m3u8Match[0];
           }
         } catch {}
 
-        const sourceName = source.charAt(0).toUpperCase() + source.slice(1);
         if (m3u8Url) {
           results.push({
             id: `es-${source}-${id}-s${server}`,
@@ -69,7 +69,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
             hd: true,
             m3u8Url,
             quality: "HD",
-            source: `${sourceName} S${server} (EmbedSports)`,
+            source: `Admin S${server} (EmbedSports)`,
             viewers: 0,
             provider: "embedsports",
             corsEnabled: false,
@@ -85,7 +85,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
             hd: true,
             m3u8Url: "",
             quality: "HD",
-            source: `${sourceName} S${server} (EmbedSports)`,
+            source: `Admin S${server} (EmbedSports)`,
             viewers: 0,
             provider: "embedsports",
             corsEnabled: false,

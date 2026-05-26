@@ -302,7 +302,8 @@ async function resolveStreamedPK(sources: { source: string; id: string }[]): Pro
         localResults.push({
           id: `sp-${src.source}-${s.id || s.streamNo}`, streamNo: s.streamNo || localResults.length + 1,
           language: s.language || "English", hd: s.hd !== false, m3u8Url: "", quality: s.hd ? "HD" : "SD",
-          source: sourceLabel, viewers: s.viewers || 0, provider: "streamed",
+          source: `${sourceLabel} S${s.streamNo || localResults.length + 1}`,
+          viewers: s.viewers || 0, provider: "streamed",
           corsEnabled: false, referer: "https://streamed.pk/", embedUrl: s.embedUrl, streamType: "embed",
         });
       }
