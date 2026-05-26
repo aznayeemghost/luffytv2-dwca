@@ -175,6 +175,10 @@ export default function LiveWatchPage(props: LiveWatchProps) {
   const [scoreboardData, setScoreboardData] = useState<{ homeScore: string; awayScore: string; period: string; clock: string; statusDetail: string } | null>(null);
   const [scoreboardLoading, setScoreboardLoading] = useState(false);
 
+  // ── Match Stats state ──
+  const [matchStats, setMatchStats] = useState<any>(null);
+  const [matchStatsLoading, setMatchStatsLoading] = useState(false);
+
   const sportIcon = sportIcons[props.matchSport || "other"] || "📺";
   const sportColor = sportColors[props.matchSport || "other"] || "#6b7280";
   const isUpcoming = props.matchDate ? props.matchDate > Date.now() : false;
@@ -299,6 +303,32 @@ export default function LiveWatchPage(props: LiveWatchProps) {
     setShowPlayButton(true);
     setPlayerState("ready");
   }, [activeStream]);
+
+  // ── Fetch Match Stats from WatchFooty ──
+  useEffect(() => {
+    const wfId = props.matchWatchfootyId;
+    if (!wfId) return;
+
+    const fetchStats = async () => {
+      setMatchStatsLoading(true);
+      try {
+        const res = await fetch(`/api/match-stats?id=${encodeURIComponent(wfId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setMatchStats(data);
+          // Update scores from match details if available
+          if (data?.details?.scores) {
+            // These come from the match stats response
+          }
+        }
+      } catch {}
+      setMatchStatsLoading(false);
+    };
+
+    fetchStats();
+    const iv = setInterval(fetchStats, 60000); // Refresh every 60s
+    return () => clearInterval(iv);
+  }, [props.matchWatchfootyId]);
 
   // ── Fetch ESPN live score when scoreboard is showing ──
   useEffect(() => {
@@ -982,6 +1012,123 @@ export default function LiveWatchPage(props: LiveWatchProps) {
               </button>
             </div>
           </div>
+
+          {/* ═══ Match Stats ═══ */}
+          {(matchStats || matchStatsLoading) && props.matchWatchfootyId && (
+            <div className="mb-6">
+              <h3 className="text-[11px] font-bold text-white/25 uppercase tracking-wider mb-3" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>
+                📊 Match Statistics
+              </h3>
+
+              {matchStatsLoading && !matchStats && (
+                <div className="flex items-center gap-2 py-6 justify-center">
+                  <div className="w-4 h-4 rounded-full border border-white/20 border-t-white/60 animate-spin" />
+                  <span className="text-[10px] text-white/25">Loading match stats...</span>
+                </div>
+              )}
+
+              {matchStats?.statistics && (
+                <div className="space-y-4">
+                  {/* Boxscore / Key Stats */}
+                  {matchStats.statistics.boxscore?.teams && (
+                    <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl overflow-hidden">
+                      <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${sportColor}, transparent)` }} />
+                      <div className="p-4">
+                        <h4 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-3">Key Stats</h4>
+                        {matchStats.statistics.boxscore.teams.map((team: any, idx: number) => (
+                          <div key={idx} className="mb-3 last:mb-0">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-[11px] font-bold text-white/70">{team.name || (idx === 0 ? props.matchHomeTeam : props.matchAwayTeam)}</span>
+                              {idx === 0 && <span className="text-[8px] px-1.5 py-0.5 rounded bg-white/5 text-white/30">HOME</span>}
+                              {idx === 1 && <span className="text-[8px] px-1.5 py-0.5 rounded bg-white/5 text-white/30">AWAY</span>}
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {team.statistics?.slice(0, 6).map((stat: any, si: number) => (
+                                <div key={si} className="flex items-center justify-between py-1.5 px-2 rounded-lg bg-white/[0.02]">
+                                  <span className="text-[10px] text-white/35">{stat.name}</span>
+                                  <span className="text-[10px] font-bold" style={{ color: sportColor }}>{stat.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Commentary Feed */}
+                  {matchStats.statistics.commentary && matchStats.statistics.commentary.length > 0 && (
+                    <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl overflow-hidden">
+                      <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${sportColor}50, transparent)` }} />
+                      <div className="p-4">
+                        <h4 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-3">Commentary</h4>
+                        <div className="max-h-64 overflow-y-auto space-y-2 scrollbar-hide">
+                          {matchStats.statistics.commentary.slice(0, 20).map((comment: any, ci: number) => (
+                            <div key={ci} className="flex gap-3 py-2 border-b border-white/[0.03] last:border-0">
+                              {comment.time && (
+                                <span className="text-[9px] font-bold text-white/25 flex-shrink-0 w-10 text-right">{comment.time}</span>
+                              )}
+                              <span className="text-[10px] text-white/50 leading-relaxed">{comment.text || comment.comment}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Lineups / Rosters */}
+                  {matchStats.statistics.rosters && matchStats.statistics.rosters.length > 0 && (
+                    <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl overflow-hidden">
+                      <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${sportColor}30, transparent)` }} />
+                      <div className="p-4">
+                        <h4 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-3">Lineups</h4>
+                        <div className="grid grid-cols-2 gap-3">
+                          {matchStats.statistics.rosters.map((roster: any, ri: number) => (
+                            <div key={ri}>
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-[10px] font-bold text-white/60">{roster.team?.name || (ri === 0 ? props.matchHomeTeam : props.matchAwayTeam)}</span>
+                                {ri === 0 && <span className="text-[7px] px-1 py-0.5 rounded bg-white/5 text-white/25">HOME</span>}
+                                {ri === 1 && <span className="text-[7px] px-1 py-0.5 rounded bg-white/5 text-white/25">AWAY</span>}
+                              </div>
+                              <div className="space-y-1">
+                                {roster.roster?.filter((p: any) => p.starter).slice(0, 11).map((player: any, pi: number) => (
+                                  <div key={pi} className="flex items-center gap-2 py-1">
+                                    <span className="text-[9px] font-bold w-5 text-center text-white/25">{player.jersey || pi + 1}</span>
+                                    <span className="text-[10px] text-white/45 truncate">{player.name}</span>
+                                    {player.plays?.length > 0 && (
+                                      <span className="ml-auto text-[8px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400/60">{player.plays.length}</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Venue */}
+                  {matchStats.statistics.venue && (
+                    <div className="flex items-center gap-3 py-2 px-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+                      <svg className="w-4 h-4 text-white/20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" /><circle cx="12" cy="10" r="3" /></svg>
+                      <div>
+                        <span className="text-[10px] text-white/30">Venue</span>
+                        <span className="text-[11px] text-white/60 ml-2">{matchStats.statistics.venue.name || matchStats.statistics.venue}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* No stats available */}
+              {matchStats && !matchStats.statistics && !matchStatsLoading && (
+                <div className="text-center py-6 bg-white/[0.02] rounded-xl border border-white/[0.04]">
+                  <p className="text-[11px] text-white/25">No statistics available for this match</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Tips */}
           <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">

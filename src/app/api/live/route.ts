@@ -364,6 +364,78 @@ async function fetchWatchfootySports(): Promise<SportCategory[]> {
   } catch { return []; }
 }
 
+// ── Fetch WatchFooty top leagues ──
+async function fetchWatchfootyTopLeagues(sport?: string): Promise<string[]> {
+  try {
+    const url = sport
+      ? `${WF_BASE}/api/v1/top-leagues/${encodeURIComponent(sport)}`
+      : `${WF_BASE}/api/v1/top-leagues`;
+    const res = await httpGet(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data.map(String) : [];
+  } catch { return []; }
+}
+
+// ── Fetch WatchFooty top teams ──
+async function fetchWatchfootyTopTeams(sport?: string): Promise<string[]> {
+  try {
+    const url = sport
+      ? `${WF_BASE}/api/v1/top-teams/${encodeURIComponent(sport)}`
+      : `${WF_BASE}/api/v1/top-teams`;
+    const res = await httpGet(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data.map(String) : [];
+  } catch { return []; }
+}
+
+// ── Fetch WatchFooty popular matches ──
+async function fetchWatchfootyPopular(): Promise<LiveMatch[]> {
+  try {
+    const res = await httpGet(`${WF_BASE}/api/v1/matches/popular`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+
+    return data.map((m: any): LiveMatch => {
+      const sport = mapWfSport(m.sport || "other");
+      const streams = Array.isArray(m.streams) ? m.streams.map((s: any) => ({
+        id: String(s.id || ""),
+        url: s.url || "",
+        quality: s.quality || "hd",
+        language: s.language || "english",
+        isRedirect: s.isRedirect || false,
+        nsfw: s.nsfw || false,
+        ads: s.ads || false,
+      })) : [];
+      return {
+        id: `wf-${m.matchId || Math.random()}`,
+        title: m.title || "Match",
+        sport,
+        sportName: SPORT_NAMES[sport] || m.sport || capitalize(sport),
+        date: m.date ? new Date(m.date).getTime() : (m.timestamp ? m.timestamp * 1000 : 0),
+        poster: m.poster ? (m.poster.startsWith("http") ? m.poster : `${WF_BASE}${m.poster}`) : "",
+        popular: true,
+        homeTeam: m.teams?.home?.name || "",
+        awayTeam: m.teams?.away?.name || "",
+        homeBadge: m.teams?.home?.logoUrl ? (m.teams.home.logoUrl.startsWith("http") ? m.teams.home.logoUrl : `${WF_BASE}${m.teams.home.logoUrl}`) : (m.teams?.home?.logo ? (m.teams.home.logo.startsWith("http") ? m.teams.home.logo : `${WF_BASE}${m.teams.home.logo}`) : ""),
+        awayBadge: m.teams?.away?.logoUrl ? (m.teams.away.logoUrl.startsWith("http") ? m.teams.away.logoUrl : `${WF_BASE}${m.teams.away.logoUrl}`) : (m.teams?.away?.logo ? (m.teams.away.logo.startsWith("http") ? m.teams.away.logo : `${WF_BASE}${m.teams.away.logo}`) : ""),
+        isLive: m.status === "in" || m.status === "live",
+        apiSource: "watchfooty",
+        sources: [],
+        watchfootyId: m.matchId,
+        watchfootyStreams: streams,
+        league: m.league || "",
+        leagueLogo: m.leagueLogo ? (m.leagueLogo.startsWith("http") ? m.leagueLogo : `${WF_BASE}${m.leagueLogo}`) : "",
+        homeScore: m.scores?.home ?? undefined,
+        awayScore: m.scores?.away ?? undefined,
+        currentMinute: m.currentMinute || undefined,
+      };
+    });
+  } catch { return []; }
+}
+
 // ── SOURCE 5: streamed.pk (9 stream sources: alpha–intel) ──
 async function fetchStreamedPK(endpoint: string): Promise<LiveMatch[]> {
   try {
@@ -608,17 +680,20 @@ export async function GET(req: Request) {
   const mode = url.searchParams.get("mode") || ""; // "tv" for channels only
 
   try {
-    // Fetch WatchFooty sports list in parallel with matches
+    // Fetch WatchFooty sports list + top leagues/teams in parallel with matches
     const wfSportsPromise = fetchWatchfootySports();
+    const wfTopLeaguesPromise = fetchWatchfootyTopLeagues(sport || undefined);
+    const wfTopTeamsPromise = fetchWatchfootyTopTeams(sport || undefined);
 
     // Fetch from ALL sources in parallel
-    const [streamfree, damiChannels, damiSports, wfLive, wfAll, wfPopularLive, streamedLive, streamedToday, streamedUpcoming, espn, sportsembed, embedsports] = await Promise.allSettled([
+    const [streamfree, damiChannels, damiSports, wfLive, wfAll, wfPopularLive, wfPopular, streamedLive, streamedToday, streamedUpcoming, espn, sportsembed, embedsports] = await Promise.allSettled([
       fetchStreamfreeStreams(),
       mode === "tv" ? fetchDamiTVChannels() : Promise.resolve([]),
       fetchDamiTVStreams(),
       fetchWatchfootyLive(),
       fetchWatchfootyAll(),
       fetchWatchfootyPopularLive(),
+      fetchWatchfootyPopular(),
       fetchStreamedPK("/api/matches/live"),
       fetchStreamedPK("/api/matches/all-today"),
       fetchStreamedPK("/api/matches/upcoming"),
@@ -628,6 +703,8 @@ export async function GET(req: Request) {
     ]);
 
     const wfSports = await wfSportsPromise;
+    const topLeagues = await wfTopLeaguesPromise;
+    const topTeams = await wfTopTeamsPromise;
 
     const allLists: LiveMatch[][] = [
       streamfree.status === "fulfilled" ? streamfree.value : [],
@@ -636,6 +713,7 @@ export async function GET(req: Request) {
       wfLive.status === "fulfilled" ? wfLive.value : [],
       wfAll.status === "fulfilled" ? wfAll.value : [],
       wfPopularLive.status === "fulfilled" ? wfPopularLive.value : [],
+      wfPopular.status === "fulfilled" ? wfPopular.value : [],
       streamedLive.status === "fulfilled" ? streamedLive.value : [],
       streamedToday.status === "fulfilled" ? streamedToday.value : [],
       streamedUpcoming.status === "fulfilled" ? streamedUpcoming.value : [],
@@ -740,6 +818,8 @@ export async function GET(req: Request) {
       liveCount: Object.values(liveCountBySport).reduce((a, b) => a + b, 0),
       popularLiveCount,
       sources: sourceCounts,
+      topLeagues,
+      topTeams,
     });
   } catch (error: any) {
     return NextResponse.json(
