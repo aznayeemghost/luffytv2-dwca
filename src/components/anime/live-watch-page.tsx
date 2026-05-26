@@ -249,7 +249,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
   const _awayTeam = props.matchAwayTeam || fetchedMatch?.awayTeam || "";
   const _homeBadge = props.matchHomeBadge || fetchedMatch?.homeBadge || "";
   const _awayBadge = props.matchAwayBadge || fetchedMatch?.awayBadge || "";
-  const _title = _title || "";
+  const _title = props.matchTitle || fetchedMatch?.title || "";
   const _poster = props.matchPoster || fetchedMatch?.poster || "";
   const _sport = props.matchSport || fetchedMatch?.sport || "other";
   const _sportName = props.matchSportName || fetchedMatch?.sportName || "";
