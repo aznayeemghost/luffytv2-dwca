@@ -221,7 +221,8 @@ async function fetchWatchfootyLive(): Promise<LiveMatch[]> {
     const data = await res.json();
     if (!Array.isArray(data)) return [];
 
-    return data.map((m: any): LiveMatch => {
+    return data.map((raw: any): LiveMatch => {
+      const m = deepToPrimitive(raw); // Convert ALL {value, displayValue} objects to primitives
       const sport = mapWfSport(m.sport || "other");
       const streams = Array.isArray(m.streams) ? m.streams.map((s: any) => ({
         id: String(s.id || ""),
@@ -266,7 +267,8 @@ async function fetchWatchfootyAll(): Promise<LiveMatch[]> {
     const data = await res.json();
     if (!Array.isArray(data)) return [];
 
-    return data.map((m: any): LiveMatch => {
+    return data.map((raw: any): LiveMatch => {
+      const m = deepToPrimitive(raw); // Convert ALL {value, displayValue} objects to primitives
       const sport = mapWfSport(m.sport || "other");
       const streams = Array.isArray(m.streams) ? m.streams.map((s: any) => ({
         id: String(s.id || ""),
@@ -311,7 +313,8 @@ async function fetchWatchfootyPopularLive(): Promise<LiveMatch[]> {
     const data = await res.json();
     if (!Array.isArray(data)) return [];
 
-    return data.map((m: any): LiveMatch => {
+    return data.map((raw: any): LiveMatch => {
+      const m = deepToPrimitive(raw); // Convert ALL {value, displayValue} objects to primitives
       const sport = mapWfSport(m.sport || "other");
       const streams = Array.isArray(m.streams) ? m.streams.map((s: any) => ({
         id: String(s.id || ""),
@@ -398,7 +401,8 @@ async function fetchWatchfootyPopular(): Promise<LiveMatch[]> {
     const data = await res.json();
     if (!Array.isArray(data)) return [];
 
-    return data.map((m: any): LiveMatch => {
+    return data.map((raw: any): LiveMatch => {
+      const m = deepToPrimitive(raw); // Convert ALL {value, displayValue} objects to primitives
       const sport = mapWfSport(m.sport || "other");
       const streams = Array.isArray(m.streams) ? m.streams.map((s: any) => ({
         id: String(s.id || ""),
@@ -656,13 +660,35 @@ function toPrimitive(v: any): any {
   if (v === null || v === undefined) return undefined;
   if (typeof v === "object") {
     // Handle {value, displayValue} pattern from some APIs
-    if ("value" in v) return v.value;
-    if ("displayValue" in v) return v.displayValue;
+    if ("value" in v) return toPrimitive(v.value);
+    if ("displayValue" in v) return toPrimitive(v.displayValue);
     // Handle other object patterns
     if (typeof v.toString === "function" && v.toString() !== "[object Object]") return v.toString();
     return undefined;
   }
   return v;
+}
+
+// Deep conversion: recursively converts ALL {value, displayValue} objects to primitives
+// Use this on raw API responses from WatchFooty BEFORE extracting fields
+function deepToPrimitive(obj: any): any {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) return obj.map(deepToPrimitive);
+  if (typeof obj === "object") {
+    const keys = Object.keys(obj);
+    // If this looks like a WatchFooty value object {value, displayValue}, extract the primitive
+    if (keys.length <= 3 && ("value" in obj || "displayValue" in obj)) {
+      if ("value" in obj) return deepToPrimitive(obj.value);
+      if ("displayValue" in obj) return deepToPrimitive(obj.displayValue);
+    }
+    // Recursively convert all nested properties
+    const result: Record<string, any> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      result[k] = deepToPrimitive(v);
+    }
+    return result;
+  }
+  return obj;
 }
 function capitalize(s: string): string { return s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, " ") : ""; }
 function mapCategoryToSport(cat: string): string {
