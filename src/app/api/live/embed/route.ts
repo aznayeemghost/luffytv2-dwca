@@ -409,10 +409,15 @@ export async function GET(req: Request) {
     triedProviders.add("streamfree");
   }
 
-  // Provider 2: DamiTV — try with ALL available IDs
+  // Helper: clean matchId by stripping prefixes like "wf-", "espn-", etc.
+  const cleanMatchId = matchId.replace(/^(espn|wf|sp|sf|cdn|dami|se|es)-/i, "");
+
+  // Provider 2: DamiTV — try with ALL available IDs (cleaned)
   const damitvIds = new Set<string>();
   if (damitvId) damitvIds.add(damitvId);
   if (channelCode) damitvIds.add(channelCode);
+  // Use cleaned matchId (strip wf-, espn- prefixes that break DamiTV)
+  if (cleanMatchId && cleanMatchId !== matchId) damitvIds.add(cleanMatchId);
   if (matchId) damitvIds.add(matchId);
   for (const id of damitvIds) {
     resolvePromises.push(resolveDamiTV(id));
@@ -434,19 +439,17 @@ export async function GET(req: Request) {
   // ALWAYS also try StreamedPK with ALL 10 sources using matchId as fallback
   // This ensures we catch streams even when sources array is empty or wrong format
   if (matchId) {
-    // Strip any prefix like "espn-", "wf-", "sp-" from matchId for StreamedPK
-    const cleanId = matchId.replace(/^(espn|wf|sp|sf|cdn|dami|se|es)-/i, "");
     const spSources = [
-      { source: "admin", id: cleanId },
-      { source: "echo", id: cleanId },
-      { source: "delta", id: cleanId },
-      { source: "bravo", id: cleanId },
-      { source: "alpha", id: cleanId },
-      { source: "charlie", id: cleanId },
-      { source: "foxtrot", id: cleanId },
-      { source: "golf", id: cleanId },
-      { source: "hotel", id: cleanId },
-      { source: "intel", id: cleanId },
+      { source: "admin", id: cleanMatchId },
+      { source: "echo", id: cleanMatchId },
+      { source: "delta", id: cleanMatchId },
+      { source: "bravo", id: cleanMatchId },
+      { source: "alpha", id: cleanMatchId },
+      { source: "charlie", id: cleanMatchId },
+      { source: "foxtrot", id: cleanMatchId },
+      { source: "golf", id: cleanMatchId },
+      { source: "hotel", id: cleanMatchId },
+      { source: "intel", id: cleanMatchId },
     ];
     // Only add sources that aren't already in parsedSources
     const existingKeys = new Set(parsedSources.map(s => `${s.source}:${s.id}`));
@@ -464,25 +467,21 @@ export async function GET(req: Request) {
     resolvePromises.push(resolveSportsembedSu(sportsrcCategory, sportsrcId));
     triedProviders.add("sportsembed");
   }
-  // EmbedSports: use the parsedSources array (which has correct provider+slug pairs)
-  // If no parsedSources, construct from all StreamedPK providers using matchId as slug
-  if (parsedSources.length > 0) {
-    resolvePromises.push(resolveEmbedsportsTop(parsedSources));
-    triedProviders.add("embedsports");
-  } else if (matchId) {
-    const cleanId = matchId.replace(/^(espn|wf|sp|sf|cdn|dami|se|es)-/i, "");
-    const fallbackSources = STREAMED_SOURCES.map(s => ({ source: s, id: cleanId }));
-    resolvePromises.push(resolveEmbedsportsTop(fallbackSources));
-    triedProviders.add("embedsports");
-  }
+  // EmbedSports: ALWAYS try — use parsedSources if available, otherwise all providers
+  // parsedSources has the correct provider+slug pairs from StreamedPK match data
+  // Fallback: try all 10 providers with cleaned matchId
+  const embedsportsSources = parsedSources.length > 0
+    ? parsedSources
+    : STREAMED_SOURCES.map(s => ({ source: s, id: cleanMatchId }));
+  resolvePromises.push(resolveEmbedsportsTop(embedsportsSources));
+  triedProviders.add("embedsports");
 
   // Fallback: if no providers matched at all, try everything with matchId
   if (resolvePromises.length === 0 && matchId) {
-    const cleanId = matchId.replace(/^(espn|wf|sp|sf|cdn|dami|se|es)-/i, "");
-    const fallbackSources = STREAMED_SOURCES.map(s => ({ source: s, id: cleanId }));
-    resolvePromises.push(resolveDamiTV(cleanId));
+    const fallbackSources = STREAMED_SOURCES.map(s => ({ source: s, id: cleanMatchId }));
+    resolvePromises.push(resolveDamiTV(cleanMatchId));
     resolvePromises.push(resolveStreamedPK(fallbackSources));
-    resolvePromises.push(resolveSportsembedSu("sports", cleanId));
+    resolvePromises.push(resolveSportsembedSu("sports", cleanMatchId));
     resolvePromises.push(resolveEmbedsportsTop(fallbackSources));
   }
 
