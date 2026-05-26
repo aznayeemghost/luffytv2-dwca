@@ -145,6 +145,7 @@ function timeAgo(dateStr: string): string {
 
 function capitalize(s: string) { return s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, " ") : ""; }
 // Safe primitive extraction: handles WatchFooty {value, displayValue} objects
+// NOTE: Do NOT restrict by key count — WatchFooty objects can have extra keys
 function toPrimitive(v: any): any {
   if (v === null || v === undefined) return v;
   if (typeof v === "object") {

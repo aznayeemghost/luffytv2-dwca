@@ -21,13 +21,14 @@ function makeCtrl() {
 // ── Deep conversion: {value, displayValue} objects → primitives ──
 // WatchFooty API returns many fields as {value: X, displayValue: "X"} objects.
 // React cannot render objects as children, so we must recursively convert them.
+// NOTE: Do NOT restrict by key count — WatchFooty objects can have extra keys
+// like {value, displayValue, type, shortDisplayValue} which must still be converted.
 function deepToPrimitive(obj: any): any {
   if (obj === null || obj === undefined) return obj;
   if (Array.isArray(obj)) return obj.map(deepToPrimitive);
   if (typeof obj === "object") {
-    // Check for the {value, displayValue} pattern
-    const keys = Object.keys(obj);
-    if (keys.length <= 2 && ("value" in obj || "displayValue" in obj)) {
+    // Check for the {value, displayValue} pattern — do NOT limit by key count
+    if ("value" in obj || "displayValue" in obj) {
       // This is a WatchFooty value object — extract the primitive
       if ("value" in obj) return deepToPrimitive(obj.value);
       if ("displayValue" in obj) return deepToPrimitive(obj.displayValue);

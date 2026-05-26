@@ -244,20 +244,9 @@ export default function LiveWatchPage(props: LiveWatchProps) {
   const hasTeams = props.matchHomeTeam || props.matchAwayTeam || fetchedMatch?.homeTeam || fetchedMatch?.awayTeam;
   const isEmbedStream = activeStream?.streamType === "embed";
 
-  // Use fetched match data as fallback when props are empty (page refresh)
-  const _homeTeam = props.matchHomeTeam || fetchedMatch?.homeTeam || "";
-  const _awayTeam = props.matchAwayTeam || fetchedMatch?.awayTeam || "";
-  const _homeBadge = props.matchHomeBadge || fetchedMatch?.homeBadge || "";
-  const _awayBadge = props.matchAwayBadge || fetchedMatch?.awayBadge || "";
-  const _title = props.matchTitle || fetchedMatch?.title || "";
-  const _poster = props.matchPoster || fetchedMatch?.poster || "";
-  const _sport = props.matchSport || fetchedMatch?.sport || "other";
-  const _sportName = props.matchSportName || fetchedMatch?.sportName || "";
-  const _league = props.matchLeague || fetchedMatch?.league || "";
-  const _leagueLogo = props.matchLeagueLogo || fetchedMatch?.leagueLogo || "";
-
-  // WatchFooty score data from props (with fetched fallback)
+  // ── SAFETY HELPERS (must be defined BEFORE use) ──
   // Safely handle API values that might be objects like {value, displayValue}
+  // NOTE: Do NOT restrict by key count — WatchFooty objects can have extra keys
   const toVal = (v: any): any => {
     if (v === null || v === undefined) return undefined;
     if (typeof v === "object" && v !== null) {
@@ -274,6 +263,21 @@ export default function LiveWatchPage(props: LiveWatchProps) {
     if (typeof val === "object") return ""; // Final safety net
     return String(val);
   };
+
+  // Use fetched match data as fallback when props are empty (page refresh)
+  // ALL values go through safeStr() to prevent React error #31 from {value, displayValue} objects
+  const _homeTeam = safeStr(props.matchHomeTeam || fetchedMatch?.homeTeam);
+  const _awayTeam = safeStr(props.matchAwayTeam || fetchedMatch?.awayTeam);
+  const _homeBadge = safeStr(props.matchHomeBadge || fetchedMatch?.homeBadge);
+  const _awayBadge = safeStr(props.matchAwayBadge || fetchedMatch?.awayBadge);
+  const _title = safeStr(props.matchTitle || fetchedMatch?.title);
+  const _poster = safeStr(props.matchPoster || fetchedMatch?.poster);
+  const _sport = safeStr(props.matchSport || fetchedMatch?.sport) || "other";
+  const _sportName = safeStr(props.matchSportName || fetchedMatch?.sportName);
+  const _league = safeStr(props.matchLeague || fetchedMatch?.league);
+  const _leagueLogo = safeStr(props.matchLeagueLogo || fetchedMatch?.leagueLogo);
+
+  // WatchFooty score data from props (with fetched fallback)
   const wfHomeScore = toVal(props.matchHomeScore ?? fetchedMatch?.homeScore);
   const wfAwayScore = toVal(props.matchAwayScore ?? fetchedMatch?.awayScore);
   const wfCurrentMinute = toVal(props.matchCurrentMinute || fetchedMatch?.currentMinute);

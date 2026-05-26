@@ -671,13 +671,16 @@ function toPrimitive(v: any): any {
 
 // Deep conversion: recursively converts ALL {value, displayValue} objects to primitives
 // Use this on raw API responses from WatchFooty BEFORE extracting fields
+// NOTE: Do NOT restrict by key count — WatchFooty objects can have extra keys
+// like {value, displayValue, type, shortDisplayValue} which must still be converted.
 function deepToPrimitive(obj: any): any {
   if (obj === null || obj === undefined) return obj;
   if (Array.isArray(obj)) return obj.map(deepToPrimitive);
   if (typeof obj === "object") {
-    const keys = Object.keys(obj);
     // If this looks like a WatchFooty value object {value, displayValue}, extract the primitive
-    if (keys.length <= 3 && ("value" in obj || "displayValue" in obj)) {
+    // Do NOT limit by key count — some objects have extra metadata keys
+    if ("value" in obj || "displayValue" in obj) {
+      // Prefer numeric value, fall back to displayValue
       if ("value" in obj) return deepToPrimitive(obj.value);
       if ("displayValue" in obj) return deepToPrimitive(obj.displayValue);
     }
