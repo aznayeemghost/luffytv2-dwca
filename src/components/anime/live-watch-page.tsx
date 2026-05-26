@@ -181,19 +181,87 @@ export default function LiveWatchPage(props: LiveWatchProps) {
   const [matchStats, setMatchStats] = useState<any>(null);
   const [matchStatsLoading, setMatchStatsLoading] = useState(false);
 
-  const sportIcon = sportIcons[props.matchSport || "other"] || "📺";
-  const sportColor = sportColors[props.matchSport || "other"] || "#6b7280";
-  const isUpcoming = props.matchDate ? props.matchDate > Date.now() : false;
-  const matchTime = props.matchDate ? formatMatchTime(props.matchDate) : "";
-  const hasTeams = props.matchHomeTeam || props.matchAwayTeam;
+  // ── Fetched match data (when page is refreshed directly from URL, props are empty) ──
+  const [fetchedMatch, setFetchedMatch] = useState<LiveMatch | null>(null);
+
+  // When props are empty (page refresh/direct URL), fetch match data from API
+  useEffect(() => {
+    if (!props.matchId) return;
+    // Only fetch if we're missing critical data
+    if (props.matchHomeTeam && props.matchTitle) return;
+    const mid = props.matchId;
+    const fetchMatchData = async () => {
+      try {
+        const res = await fetch(`/api/live`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const match = (data.matches || []).find((m: LiveMatch) => m.id === mid);
+        if (match) {
+          setFetchedMatch(match);
+          // Update the route in the store with the full match data
+          const currentRoute = useAppStore.getState().route;
+          if (currentRoute.page === "live-watch" && currentRoute.matchId === mid) {
+            useAppStore.setState({
+              route: {
+                ...currentRoute,
+                matchTitle: match.title || currentRoute.matchTitle,
+                matchSportName: match.sportName || (currentRoute as any).matchSportName,
+                matchHomeTeam: match.homeTeam || (currentRoute as any).matchHomeTeam,
+                matchAwayTeam: match.awayTeam || (currentRoute as any).matchAwayTeam,
+                matchHomeBadge: match.homeBadge || (currentRoute as any).matchHomeBadge,
+                matchAwayBadge: match.awayBadge || (currentRoute as any).matchAwayBadge,
+                matchPoster: match.poster || (currentRoute as any).matchPoster,
+                matchSources: JSON.stringify(match.sources) || (currentRoute as any).matchSources,
+                matchDate: match.date || (currentRoute as any).matchDate,
+                matchWatchfootyId: match.watchfootyId ? String(match.watchfootyId) : (currentRoute as any).matchWatchfootyId,
+                matchApiSource: match.apiSource || (currentRoute as any).matchApiSource,
+                matchWatchfootyStreams: match.watchfootyStreams ? JSON.stringify(match.watchfootyStreams) : (currentRoute as any).matchWatchfootyStreams,
+                matchLeague: match.league || (currentRoute as any).matchLeague,
+                matchLeagueLogo: match.leagueLogo || (currentRoute as any).matchLeagueLogo,
+                matchHomeScore: match.homeScore ?? (currentRoute as any).matchHomeScore,
+                matchAwayScore: match.awayScore ?? (currentRoute as any).matchAwayScore,
+                matchCurrentMinute: match.currentMinute || (currentRoute as any).matchCurrentMinute,
+                matchStreamKey: match.streamKey || (currentRoute as any).matchStreamKey,
+                matchStreamCategory: match.streamCategory || (currentRoute as any).matchStreamCategory,
+                matchDamitvId: match.damitvId || (currentRoute as any).matchDamitvId,
+                matchSportsrcCategory: match.sportsrcCategory || (currentRoute as any).matchSportsrcCategory,
+                matchSportsrcId: match.sportsrcId || (currentRoute as any).matchSportsrcId,
+                matchChannelName: match.channelName || (currentRoute as any).matchChannelName,
+                matchChannelCode: match.channelCode || (currentRoute as any).matchChannelCode,
+              } as any,
+            });
+          }
+        }
+      } catch {}
+    };
+    fetchMatchData();
+  }, [props.matchId]);
+
+  const sportIcon = sportIcons[props.matchSport || fetchedMatch?.sport || "other"] || "📺";
+  const sportColor = sportColors[props.matchSport || fetchedMatch?.sport || "other"] || "#6b7280";
+  const isUpcoming = (props.matchDate || fetchedMatch?.date) ? (props.matchDate || fetchedMatch?.date || 0) > Date.now() : false;
+  const matchTime = (props.matchDate || fetchedMatch?.date) ? formatMatchTime(props.matchDate || fetchedMatch?.date || 0) : "";
+  const hasTeams = props.matchHomeTeam || props.matchAwayTeam || fetchedMatch?.homeTeam || fetchedMatch?.awayTeam;
   const isEmbedStream = activeStream?.streamType === "embed";
 
-  // WatchFooty score data from props
-  const wfHomeScore = props.matchHomeScore;
-  const wfAwayScore = props.matchAwayScore;
-  const wfCurrentMinute = props.matchCurrentMinute;
-  const wfLeague = props.matchLeague;
-  const wfLeagueLogo = props.matchLeagueLogo;
+  // Use fetched match data as fallback when props are empty (page refresh)
+  const _homeTeam = props.matchHomeTeam || fetchedMatch?.homeTeam || "";
+  const _awayTeam = props.matchAwayTeam || fetchedMatch?.awayTeam || "";
+  const _homeBadge = props.matchHomeBadge || fetchedMatch?.homeBadge || "";
+  const _awayBadge = props.matchAwayBadge || fetchedMatch?.awayBadge || "";
+  const _title = _title || "";
+  const _poster = props.matchPoster || fetchedMatch?.poster || "";
+  const _sport = props.matchSport || fetchedMatch?.sport || "other";
+  const _sportName = props.matchSportName || fetchedMatch?.sportName || "";
+  const _league = props.matchLeague || fetchedMatch?.league || "";
+  const _leagueLogo = props.matchLeagueLogo || fetchedMatch?.leagueLogo || "";
+
+  // WatchFooty score data from props (with fetched fallback)
+  const wfHomeScore = props.matchHomeScore ?? fetchedMatch?.homeScore;
+  const wfAwayScore = props.matchAwayScore ?? fetchedMatch?.awayScore;
+  const wfCurrentMinute = props.matchCurrentMinute || fetchedMatch?.currentMinute;
+  const wfLeague = _league;
+  const wfLeagueLogo = _leagueLogo;
   const hasWfScore = wfHomeScore !== undefined && wfAwayScore !== undefined;
 
   // Computed best available scores (WatchFooty props > matchStats > ESPN scoreboardData)
@@ -401,7 +469,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
 
   // ── Fetch ESPN live score (always when team names are available) ──
   useEffect(() => {
-    if (!props.matchHomeTeam && !props.matchAwayTeam) return;
+    if (!_homeTeam && !_awayTeam) return;
 
     const fetchScore = async () => {
       setScoreboardLoading(true);
@@ -415,7 +483,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
           baseball: [{ sport: "baseball", league: "mlb" }],
         };
 
-        const leagues = espnMap[props.matchSport] || [];
+        const leagues = espnMap[_sport] || [];
         let found = false;
 
         for (const { sport, league } of leagues) {
@@ -434,13 +502,13 @@ export default function LiveWatchPage(props: LiveWatchProps) {
               const homeName = home?.team?.displayName || "";
               const awayName = away?.team?.displayName || "";
 
-              // Match by team name similarity
-              const homeMatch = homeName && props.matchHomeTeam &&
-                (homeName.toLowerCase().includes(props.matchHomeTeam.toLowerCase()) ||
-                 props.matchHomeTeam.toLowerCase().includes(homeName.toLowerCase()));
-              const awayMatch = awayName && props.matchAwayTeam &&
-                (awayName.toLowerCase().includes(props.matchAwayTeam.toLowerCase()) ||
-                 props.matchAwayTeam.toLowerCase().includes(awayName.toLowerCase()));
+              // Match by team name similarity (use fallback team names for page refresh)
+              const homeMatch = homeName && _homeTeam &&
+                (homeName.toLowerCase().includes(_homeTeam.toLowerCase()) ||
+                 _homeTeam.toLowerCase().includes(homeName.toLowerCase()));
+              const awayMatch = awayName && _awayTeam &&
+                (awayName.toLowerCase().includes(_awayTeam.toLowerCase()) ||
+                 _awayTeam.toLowerCase().includes(awayName.toLowerCase()));
 
               if (homeMatch || awayMatch || (homeMatch && awayMatch)) {
                 const statusDetail = comp.status?.type?.detail || "";
@@ -469,7 +537,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
     // Refresh score every 30 seconds
     const iv = setInterval(fetchScore, 30000);
     return () => clearInterval(iv);
-  }, [props.matchSport, props.matchHomeTeam, props.matchAwayTeam]);
+  }, [_sport, _homeTeam, _awayTeam]);
 
   const switchStream = useCallback((stream: StreamInfo) => {
     setActiveStream(stream);
@@ -725,7 +793,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
               <div className="w-24 h-24 rounded-2xl flex items-center justify-center" style={{ background: `${sportColor}10`, boxShadow: `0 0 40px ${sportColor}10` }}>
                 <span className="text-5xl">{sportIcon}</span>
               </div>
-              <h2 className="text-xl font-bold text-white/80">{props.matchTitle}</h2>
+              <h2 className="text-xl font-bold text-white/80">{_title}</h2>
               <CountdownTimer targetDate={props.matchDate} sportColor={sportColor} />
               <p className="text-xs text-white/20">{matchTime}</p>
             </div>
@@ -787,7 +855,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                   </span>
                   {iframeFailed ? "STREAM UNAVAILABLE" : "LIVE SCOREBOARD"}
                 </span>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>{sportIcon} {props.matchSportName || props.matchSport}</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>{sportIcon} {_sportName || _sport}</span>
                 {(wfLeague || matchStats?.details?.league) && (
                   <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/[0.06] text-white/50">
                     {(wfLeagueLogo || matchStats?.details?.leagueLogo) && <img src={wfLeagueLogo || matchStats?.details?.leagueLogo} alt="" className="w-3.5 h-3.5 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />}
@@ -807,12 +875,12 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                     <div className="flex items-center justify-between gap-4">
                       {/* Home Team */}
                       <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
-                        {(props.matchHomeBadge || matchStats?.details?.homeBadge) ? (
-                          <img src={props.matchHomeBadge || matchStats?.details?.homeBadge} alt={props.matchHomeTeam || matchStats?.details?.homeTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                        {(_homeBadge || matchStats?.details?.homeBadge) ? (
+                          <img src={_homeBadge || matchStats?.details?.homeBadge} alt={_homeTeam || matchStats?.details?.homeTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                         ) : (
-                          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}15`, color: `${sportColor}90` }}>{(props.matchHomeTeam || matchStats?.details?.homeTeam)?.charAt(0) || "H"}</div>
+                          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}15`, color: `${sportColor}90` }}>{(_homeTeam || matchStats?.details?.homeTeam)?.charAt(0) || "H"}</div>
                         )}
-                        <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{props.matchHomeTeam || matchStats?.details?.homeTeam || "Home"}</span>
+                        <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{_homeTeam || matchStats?.details?.homeTeam || "Home"}</span>
                       </div>
 
                       {/* Score / VS */}
@@ -835,18 +903,18 @@ export default function LiveWatchPage(props: LiveWatchProps) {
 
                       {/* Away Team */}
                       <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
-                        {(props.matchAwayBadge || matchStats?.details?.awayBadge) ? (
-                          <img src={props.matchAwayBadge || matchStats?.details?.awayBadge} alt={props.matchAwayTeam || matchStats?.details?.awayTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                        {(_awayBadge || matchStats?.details?.awayBadge) ? (
+                          <img src={_awayBadge || matchStats?.details?.awayBadge} alt={_awayTeam || matchStats?.details?.awayTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                         ) : (
-                          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}15`, color: `${sportColor}90` }}>{(props.matchAwayTeam || matchStats?.details?.awayTeam)?.charAt(0) || "A"}</div>
+                          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}15`, color: `${sportColor}90` }}>{(_awayTeam || matchStats?.details?.awayTeam)?.charAt(0) || "A"}</div>
                         )}
-                        <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{props.matchAwayTeam || matchStats?.details?.awayTeam || "Away"}</span>
+                        <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{_awayTeam || matchStats?.details?.awayTeam || "Away"}</span>
                       </div>
                     </div>
                   ) : (
                     /* No team data at all — show match title as fallback */
                     <div className="text-center">
-                      <h3 className="text-lg font-bold text-white/80 mb-2">{props.matchTitle}</h3>
+                      <h3 className="text-lg font-bold text-white/80 mb-2">{_title}</h3>
                       {hasAnyScore ? (
                         <div className="flex items-center justify-center gap-3">
                           <span className="text-2xl font-black" style={{ color: sportColor }}>{bestHomeScore}</span>
@@ -866,7 +934,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                   {/* Match status line */}
                   <div className="mt-4 pt-3 border-t border-white/[0.04] flex items-center justify-between">
                     <span className="text-[10px] text-white/25">
-                      {matchTime || props.matchSportName || "Live Match"}
+                      {matchTime || _sportName || "Live Match"}
                     </span>
                     {scoreboardData?.statusDetail ? (
                       <span className="text-[10px] text-emerald-400/60 font-bold">{scoreboardData.statusDetail}</span>
@@ -980,9 +1048,9 @@ export default function LiveWatchPage(props: LiveWatchProps) {
             <div className="p-5">
               <div className="flex items-start justify-between gap-4 mb-4">
                 <div>
-                  <h2 className="text-lg font-bold text-white mb-1.5" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>{props.matchTitle}</h2>
+                  <h2 className="text-lg font-bold text-white mb-1.5" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>{_title}</h2>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>{sportIcon} {props.matchSportName || props.matchSport}</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>{sportIcon} {_sportName || _sport}</span>
                     {isUpcoming ? (
                       <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px] font-bold">UPCOMING</span>
                     ) : (
@@ -1018,12 +1086,12 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                 )}
                 <div className="flex items-center justify-between">
                   <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
-                    {(props.matchHomeBadge || matchStats?.details?.homeBadge) ? (
-                      <img src={props.matchHomeBadge || matchStats?.details?.homeBadge} alt={props.matchHomeTeam || matchStats?.details?.homeTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    {(_homeBadge || matchStats?.details?.homeBadge) ? (
+                      <img src={_homeBadge || matchStats?.details?.homeBadge} alt={_homeTeam || matchStats?.details?.homeTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                     ) : (
-                      <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{(props.matchHomeTeam || matchStats?.details?.homeTeam)?.charAt(0) || "H"}</div>
+                      <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{(_homeTeam || matchStats?.details?.homeTeam)?.charAt(0) || "H"}</div>
                     )}
-                    <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{props.matchHomeTeam || matchStats?.details?.homeTeam || "Home"}</span>
+                    <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{_homeTeam || matchStats?.details?.homeTeam || "Home"}</span>
                   </div>
                   <div className="flex flex-col items-center gap-1 px-6">
                     {hasAnyScore ? (
@@ -1042,12 +1110,12 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                     )}
                   </div>
                   <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
-                    {(props.matchAwayBadge || matchStats?.details?.awayBadge) ? (
-                      <img src={props.matchAwayBadge || matchStats?.details?.awayBadge} alt={props.matchAwayTeam || matchStats?.details?.awayTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    {(_awayBadge || matchStats?.details?.awayBadge) ? (
+                      <img src={_awayBadge || matchStats?.details?.awayBadge} alt={_awayTeam || matchStats?.details?.awayTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                     ) : (
-                      <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{(props.matchAwayTeam || matchStats?.details?.awayTeam)?.charAt(0) || "A"}</div>
+                      <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}10`, color: `${sportColor}80` }}>{(_awayTeam || matchStats?.details?.awayTeam)?.charAt(0) || "A"}</div>
                     )}
-                    <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{props.matchAwayTeam || matchStats?.details?.awayTeam || "Away"}</span>
+                    <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{_awayTeam || matchStats?.details?.awayTeam || "Away"}</span>
                   </div>
                 </div>
               </div>
@@ -1139,7 +1207,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                         {matchStats.statistics.boxscore.teams.map((team: any, idx: number) => (
                           <div key={idx} className="mb-3 last:mb-0">
                             <div className="flex items-center gap-2 mb-2">
-                              <span className="text-[11px] font-bold text-white/70">{team.name || (idx === 0 ? props.matchHomeTeam : props.matchAwayTeam)}</span>
+                              <span className="text-[11px] font-bold text-white/70">{team.name || (idx === 0 ? _homeTeam : _awayTeam)}</span>
                               {idx === 0 && <span className="text-[8px] px-1.5 py-0.5 rounded bg-white/5 text-white/30">HOME</span>}
                               {idx === 1 && <span className="text-[8px] px-1.5 py-0.5 rounded bg-white/5 text-white/30">AWAY</span>}
                             </div>
@@ -1187,7 +1255,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                           {matchStats.statistics.rosters.map((roster: any, ri: number) => (
                             <div key={ri}>
                               <div className="flex items-center gap-2 mb-2">
-                                <span className="text-[10px] font-bold text-white/60">{roster.team?.name || (ri === 0 ? props.matchHomeTeam : props.matchAwayTeam)}</span>
+                                <span className="text-[10px] font-bold text-white/60">{roster.team?.name || (ri === 0 ? _homeTeam : _awayTeam)}</span>
                                 {ri === 0 && <span className="text-[7px] px-1 py-0.5 rounded bg-white/5 text-white/25">HOME</span>}
                                 {ri === 1 && <span className="text-[7px] px-1 py-0.5 rounded bg-white/5 text-white/25">AWAY</span>}
                               </div>
@@ -1251,7 +1319,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <span className="text-xl">{sportIcon}</span>
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>{props.matchSportName || "Sports"}</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>{_sportName || "Sports"}</span>
                 </div>
                 {isUpcoming ? (
                   <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px] font-bold">UPCOMING</span>
@@ -1262,7 +1330,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                 )}
               </div>
 
-              <h2 className="text-lg font-bold text-white mb-4 text-center leading-snug" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>{props.matchTitle}</h2>
+              <h2 className="text-lg font-bold text-white mb-4 text-center leading-snug" style={{ fontFamily: "var(--font-space-mono), 'Space Mono', monospace" }}>{_title}</h2>
 
               {isUpcoming && props.matchDate > 0 && (
                 <div className="mb-4 p-3 rounded-xl flex justify-center" style={{ background: `${sportColor}08`, border: `1px solid ${sportColor}12` }}>

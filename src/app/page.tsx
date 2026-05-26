@@ -149,6 +149,13 @@ export default function MainPage() {
       const newRoute = parseHash(window.location.hash);
       const current = useAppStore.getState().route;
       if (JSON.stringify(current) !== JSON.stringify(newRoute)) {
+        // For live-watch: preserve existing rich match data if matchId matches.
+        // navigate() stores full match data (teams, scores, streams, etc.)
+        // but the URL hash only has matchId+sport, so parseHash() would
+        // overwrite with empty strings for all other fields.
+        if (newRoute.page === "live-watch" && current.page === "live-watch" && newRoute.matchId === current.matchId) {
+          return;
+        }
         useAppStore.setState({ route: newRoute });
       }
     };
