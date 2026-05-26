@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 
-// Echo Stream Provider — MULTI-SOURCE (StreamedPK Echo + streamfree + EmbedSports)
+// Echo Stream Provider — MULTI-SOURCE (StreamedPK Echo + StreamFree + EmbedSports)
 // GET /api/stream/echo/[id]?category=sports
-// Echo has multiple sources: StreamedPK Echo, streamfree.app embed, and EmbedSports fallback
+// Echo has multiple sources: StreamedPK Echo (returns EmbedSports URLs!),
+// streamfree.app embed, and direct EmbedSports fallback with multiple servers
 export const runtime = "edge";
 
 const TIMEOUT = 12000;
@@ -20,8 +21,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const category = url.searchParams.get("category") || "sports";
   const source = "echo";
   const results: any[] = [];
+  const seenEmbedUrls = new Set<string>();
 
   // ── SOURCE 1: StreamedPK Echo ──
+  // The StreamedPK API returns embedUrl fields that ALREADY point to EmbedSports
+  // with the correct URL format: embedsports.top/embed/echo/{slug}/{server}
   try {
     const res = await fetch(`https://streamed.pk/api/stream/${source}/${encodeURIComponent(id)}`, {
       signal: AbortSignal.timeout(TIMEOUT),
@@ -33,6 +37,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       const streams = Array.isArray(data) ? data : [];
       for (const s of streams) {
         if (!s.embedUrl) continue;
+        seenEmbedUrls.add(s.embedUrl);
         results.push({
           id: `sp-${source}-${s.id || results.length}`,
           streamNo: s.streamNo || results.length + 1,
@@ -40,7 +45,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           hd: s.hd !== false,
           m3u8Url: "",
           quality: s.hd ? "HD" : "SD",
-          source: "Echo (StreamedPK)",
+          source: `Echo (StreamedPK)`,
           viewers: s.viewers || 0,
           provider: "streamed",
           corsEnabled: false,
@@ -52,10 +57,35 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
   } catch {}
 
-  // ── SOURCE 2: streamfree.app (Echo = streamfree embed) ──
+  // ── SOURCE 2: EmbedSports direct fallback ──
+  // URL format: embedsports.top/embed/{provider}/{slug}/{server_number}
+  // The id from StreamedPK sources IS the slug for EmbedSports
+  // Echo has servers 1-4
+  try {
+    for (let server = 1; server <= 4; server++) {
+      const embedsportsUrl = `https://embedsports.top/embed/${source}/${id}/${server}`;
+      if (seenEmbedUrls.has(embedsportsUrl)) continue; // Skip if StreamedPK already returned this URL
+      results.push({
+        id: `es-${source}-${id}-s${server}`,
+        streamNo: results.length + 1,
+        language: "English",
+        hd: true,
+        m3u8Url: "",
+        quality: "HD",
+        source: `Echo (EmbedSports Server ${server})`,
+        viewers: 0,
+        provider: "embedsports",
+        corsEnabled: false,
+        referer: "https://embedsports.top/",
+        embedUrl: embedsportsUrl,
+        streamType: "embed",
+      });
+    }
+  } catch {}
+
+  // ── SOURCE 3: streamfree.app (Echo = streamfree embed) ──
   try {
     const streamfreeEmbedUrl = `https://streamfree.app/embed/${category}/${id}`;
-    // Add the embed URL as a source — streamfree is a reliable embed provider
     results.push({
       id: `sf-embed-${id}`,
       streamNo: results.length + 1,
@@ -75,8 +105,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     // Try to extract M3U8 from streamfree embed page
     try {
       const html = await GEThtml(streamfreeEmbedUrl, { Referer: "https://streamfree.app/" });
-
-      // Extract tokens for M3U8 URL construction
       const m3u8Match = html.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/);
       if (m3u8Match) {
         results.push({
@@ -93,53 +121,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           referer: "https://streamfree.app/",
           streamType: "m3u8",
         });
-      }
-    } catch {}
-  } catch {}
-
-  // ── SOURCE 3: EmbedSports ──
-  try {
-    const embedsportsUrl = `https://embedsports.top/embed/${category}/${id}`;
-    results.push({
-      id: `es-embed-${id}`,
-      streamNo: results.length + 1,
-      language: "English",
-      hd: true,
-      m3u8Url: "",
-      quality: "HD",
-      source: "Echo (EmbedSports)",
-      viewers: 0,
-      provider: "embedsports",
-      corsEnabled: false,
-      referer: "https://embedsports.top/",
-      embedUrl: embedsportsUrl,
-      streamType: "embed",
-    });
-
-    // Try to extract M3U8 from EmbedSports page
-    try {
-      const html = await GEThtml(embedsportsUrl, { Referer: "https://embedsports.top/" });
-      const m3u8Matches = html.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/g);
-      if (m3u8Matches) {
-        const seen = new Set<string>();
-        for (const m3u8Url of m3u8Matches) {
-          if (seen.has(m3u8Url)) continue;
-          seen.add(m3u8Url);
-          results.push({
-            id: `es-m3u8-${id}-${results.length}`,
-            streamNo: results.length + 1,
-            language: "English",
-            hd: results.length === 0,
-            m3u8Url,
-            quality: results.length === 0 ? "720p" : "480p",
-            source: "Echo (EmbedSports HLS)",
-            viewers: 0,
-            provider: "embedsports",
-            corsEnabled: false,
-            referer: "https://embedsports.top/",
-            streamType: "m3u8",
-          });
-        }
       }
     } catch {}
   } catch {}
@@ -164,8 +145,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     });
   } catch {}
 
-  // Sort: M3U8 CORS first, then embed, then other M3U8
+  // Sort: StreamedPK embeds first (most reliable), then other embeds, then M3U8
   results.sort((a, b) => {
+    if (a.provider === "streamed" && b.provider !== "streamed") return -1;
+    if (b.provider === "streamed" && a.provider !== "streamed") return 1;
     if (a.streamType === "m3u8" && a.corsEnabled && !(b.streamType === "m3u8" && b.corsEnabled)) return -1;
     if (b.streamType === "m3u8" && b.corsEnabled && !(a.streamType === "m3u8" && a.corsEnabled)) return 1;
     if (a.streamType === "embed" && b.streamType !== "embed") return -1;

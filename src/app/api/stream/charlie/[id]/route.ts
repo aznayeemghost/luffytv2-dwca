@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-// Charlie Stream Provider — Proxies StreamedPK Charlie source
+// Charlie Stream Provider — StreamedPK Charlie + EmbedSports fallback
 // GET /api/stream/charlie/[id]
 export const runtime = "edge";
 
@@ -17,11 +17,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       headers: { "User-Agent": UA, Accept: "application/json" },
     });
 
-    if (!res.ok) {
-      return NextResponse.json({ streams: [], total: 0, error: `StreamedPK returned ${res.status}` }, { status: 502 });
-    }
-
-    const data = await res.json();
+    const data = res.ok ? await res.json() : [];
     const streams = Array.isArray(data) ? data : [];
 
     const results = streams
@@ -42,22 +38,27 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         streamType: "embed" as const,
       }));
 
-    const embedsportsUrl = `https://embedsports.top/embed/sports/${id}`;
-    results.push({
-      id: `es-fallback-${id}`,
-      streamNo: results.length + 1,
-      language: "English",
-      hd: true,
-      m3u8Url: "",
-      quality: "HD",
-      source: "EmbedSports",
-      viewers: 0,
-      provider: "embedsports",
-      corsEnabled: false,
-      referer: "https://embedsports.top/",
-      embedUrl: embedsportsUrl,
-      streamType: "embed" as const,
-    });
+    // EmbedSports fallback — correct URL format: /embed/{provider}/{slug}/{server}
+    const seenEmbedUrls = new Set(results.map((r: any) => r.embedUrl));
+    for (let server = 1; server <= 2; server++) {
+      const embedsportsUrl = `https://embedsports.top/embed/${source}/${id}/${server}`;
+      if (seenEmbedUrls.has(embedsportsUrl)) continue;
+      results.push({
+        id: `es-${source}-${id}-s${server}`,
+        streamNo: results.length + 1,
+        language: "English",
+        hd: true,
+        m3u8Url: "",
+        quality: "HD",
+        source: `Charlie (EmbedSports S${server})`,
+        viewers: 0,
+        provider: "embedsports",
+        corsEnabled: false,
+        referer: "https://embedsports.top/",
+        embedUrl: embedsportsUrl,
+        streamType: "embed" as const,
+      });
+    }
 
     return NextResponse.json({ streams: results, total: results.length, source });
   } catch (err: any) {

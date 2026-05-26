@@ -343,22 +343,30 @@ async function resolveSportsembedSu(category: string, matchId: string): Promise<
 }
 
 // ── PROVIDER 7: embedsports.top ──
-async function resolveEmbedsportsTop(category: string, matchId: string): Promise<StreamResult[]> {
+// URL format: embedsports.top/embed/{provider}/{slug}/{server_number}
+// Examples:
+//   echo: embedsports.top/embed/echo/baltimore-orioles-vs-tampa-bay-rays-baseball-178819/2
+//   delta: embedsports.top/embed/delta/live_mlb_orioles-rays-live-streaming-1308312378/1
+//   admin: embedsports.top/embed/admin/ppv-tampa-bay-rays-vs-baltimore-orioles/1
+//   golf: embedsports.top/embed/golf/22675/1
+// The slug is the same as the StreamedPK source ID for each provider
+async function resolveEmbedsportsTop(sources: { source: string; id: string }[]): Promise<StreamResult[]> {
   const results: StreamResult[] = [];
   try {
-    const embedUrl = `https://embedsports.top/embed/${category}/${matchId}`;
-    const html = await GEThtml(embedUrl, { Referer: "https://embedsports.top/" });
-    const m3u8Matches = html.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/g);
-    if (m3u8Matches) {
-      const seen = new Set<string>();
-      for (const url of m3u8Matches) {
-        if (seen.has(url)) continue; seen.add(url);
+    // For each StreamedPK source, construct EmbedSports URLs with correct format
+    for (const src of sources) {
+      const provider = src.source.toLowerCase();
+      const slug = src.id;
+      // Each provider typically has 1-4 servers; echo has up to 4, others usually 1-2
+      const maxServers = provider === "echo" ? 4 : 2;
+      for (let server = 1; server <= maxServers; server++) {
+        const embedUrl = `https://embedsports.top/embed/${provider}/${slug}/${server}`;
         results.push({
-          id: `es-${category}-${matchId}-${results.length + 1}`, streamNo: results.length + 1,
-          language: "English", hd: results.length === 0, m3u8Url: url,
-          quality: results.length === 0 ? "720p" : "480p", source: "embedsports", viewers: 0,
-          provider: "embedsports", corsEnabled: false, referer: "https://embedsports.top/",
-          embedUrl, streamType: "m3u8",
+          id: `es-${provider}-${slug}-s${server}`, streamNo: results.length + 1,
+          language: "English", hd: true, m3u8Url: "", quality: "HD",
+          source: `${src.source.charAt(0).toUpperCase() + src.source.slice(1)} (EmbedSports S${server})`,
+          viewers: 0, provider: "embedsports", corsEnabled: false,
+          referer: "https://embedsports.top/", embedUrl, streamType: "embed",
         });
       }
     }
@@ -454,18 +462,28 @@ export async function GET(req: Request) {
   const sportsrcId = url.searchParams.get("sportsrcId") || matchId || "";
   if (sportsrcId) {
     resolvePromises.push(resolveSportsembedSu(sportsrcCategory, sportsrcId));
-    resolvePromises.push(resolveEmbedsportsTop(sportsrcCategory, sportsrcId));
     triedProviders.add("sportsembed");
+  }
+  // EmbedSports: use the parsedSources array (which has correct provider+slug pairs)
+  // If no parsedSources, construct from all StreamedPK providers using matchId as slug
+  if (parsedSources.length > 0) {
+    resolvePromises.push(resolveEmbedsportsTop(parsedSources));
+    triedProviders.add("embedsports");
+  } else if (matchId) {
+    const cleanId = matchId.replace(/^(espn|wf|sp|sf|cdn|dami|se|es)-/i, "");
+    const fallbackSources = STREAMED_SOURCES.map(s => ({ source: s, id: cleanId }));
+    resolvePromises.push(resolveEmbedsportsTop(fallbackSources));
     triedProviders.add("embedsports");
   }
 
   // Fallback: if no providers matched at all, try everything with matchId
   if (resolvePromises.length === 0 && matchId) {
     const cleanId = matchId.replace(/^(espn|wf|sp|sf|cdn|dami|se|es)-/i, "");
+    const fallbackSources = STREAMED_SOURCES.map(s => ({ source: s, id: cleanId }));
     resolvePromises.push(resolveDamiTV(cleanId));
-    resolvePromises.push(resolveStreamedPK(STREAMED_SOURCES.map(s => ({ source: s, id: cleanId }))));
+    resolvePromises.push(resolveStreamedPK(fallbackSources));
     resolvePromises.push(resolveSportsembedSu("sports", cleanId));
-    resolvePromises.push(resolveEmbedsportsTop("sports", cleanId));
+    resolvePromises.push(resolveEmbedsportsTop(fallbackSources));
   }
 
   const allResults = await Promise.all(resolvePromises);
