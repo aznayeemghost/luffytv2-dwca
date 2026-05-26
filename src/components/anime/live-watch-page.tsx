@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useAppStore } from "./store";
 import Hls from "hls.js";
 
@@ -48,6 +48,12 @@ interface LiveWatchProps {
   matchApiSource?: string;
   matchSportsrcCategory?: string;
   matchSportsrcId?: string;
+  matchWatchfootyStreams?: string;
+  matchLeague?: string;
+  matchLeagueLogo?: string;
+  matchHomeScore?: number;
+  matchAwayScore?: number;
+  matchCurrentMinute?: string;
 }
 
 const sportIcons: Record<string, string> = {
@@ -176,12 +182,49 @@ export default function LiveWatchPage(props: LiveWatchProps) {
   const hasTeams = props.matchHomeTeam || props.matchAwayTeam;
   const isEmbedStream = activeStream?.streamType === "embed";
 
+  // WatchFooty score data from props
+  const wfHomeScore = props.matchHomeScore;
+  const wfAwayScore = props.matchAwayScore;
+  const wfCurrentMinute = props.matchCurrentMinute;
+  const wfLeague = props.matchLeague;
+  const wfLeagueLogo = props.matchLeagueLogo;
+  const hasWfScore = wfHomeScore !== undefined && wfAwayScore !== undefined;
+
+  // Parse WatchFooty streams from props
+  const wfStreamsFromProps = useMemo(() => {
+    if (!props.matchWatchfootyStreams) return [];
+    try {
+      const parsed = JSON.parse(props.matchWatchfootyStreams);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch { return []; }
+  }, [props.matchWatchfootyStreams]);
+
   // Fetch stream URLs from our resolver API
   useEffect(() => {
     if (!props.matchId) return;
     const fetchStreams = async () => {
       setLoadingStreams(true);
       try {
+        // First, add WatchFooty streams directly (they have embed URLs!)
+        const wfStreams: StreamInfo[] = wfStreamsFromProps
+          .filter((s: any) => s.url && !s.isRedirect)
+          .map((s: any, i: number) => ({
+            id: `wf-direct-${s.id || i}`,
+            streamNo: i + 1,
+            language: s.language || "english",
+            hd: s.quality === "hd",
+            m3u8Url: "",
+            quality: s.quality === "hd" ? "720p" : "480p",
+            source: `WatchFooty ${s.language || ""} ${s.quality || ""}`.trim(),
+            viewers: 0,
+            provider: "watchfooty",
+            embedUrl: s.url,
+            corsEnabled: false,
+            referer: "https://watchfooty.st/",
+            streamType: "embed" as const,
+          }));
+
+        // Also fetch from resolver API for other sources
         const params = new URLSearchParams();
         params.set("matchId", props.matchId);
         params.set("provider", props.matchApiSource || "");
@@ -194,18 +237,40 @@ export default function LiveWatchPage(props: LiveWatchProps) {
         if (props.matchSources) params.set("sources", props.matchSources);
 
         const res = await fetch(`/api/live/embed?${params.toString()}`);
+        let resolverStreams: StreamInfo[] = [];
         if (res.ok) {
           const data = await res.json();
           if (data.streams?.length > 0) {
-            setStreams(data.streams);
-            // Prefer embed streams first (they work reliably), then CORS M3U8, then proxy M3U8
-            const embedStream = data.streams.find((s: StreamInfo) => s.streamType === "embed" && s.embedUrl);
-            const corsStream = data.streams.find((s: StreamInfo) => s.streamType === "m3u8" && s.m3u8Url && s.corsEnabled);
-            const m3u8Stream = data.streams.find((s: StreamInfo) => s.streamType === "m3u8" && s.m3u8Url);
-            // Embed streams auto-play in iframe, so prefer those for instant playback
-            const best = embedStream || corsStream || m3u8Stream || data.streams[0];
-            setActiveStream(best);
+            resolverStreams = data.streams;
           }
+        }
+
+        // Merge: WatchFooty direct streams first, then resolver streams
+        const allStreams = [...wfStreams, ...resolverStreams];
+
+        // Deduplicate by embedUrl
+        const seen = new Set<string>();
+        const uniqueStreams = allStreams.filter(s => {
+          const key = s.streamType === "m3u8" && s.m3u8Url ? s.m3u8Url : (s.embedUrl || s.id);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+
+        if (uniqueStreams.length > 0) {
+          setStreams(uniqueStreams);
+          // Prefer embed streams first (they work reliably), then CORS M3U8, then proxy M3U8
+          const embedStream = uniqueStreams.find((s: StreamInfo) => s.streamType === "embed" && s.embedUrl);
+          const corsStream = uniqueStreams.find((s: StreamInfo) => s.streamType === "m3u8" && s.m3u8Url && s.corsEnabled);
+          const m3u8Stream = uniqueStreams.find((s: StreamInfo) => s.streamType === "m3u8" && s.m3u8Url);
+          // Embed streams auto-play in iframe, so prefer those for instant playback
+          const best = embedStream || corsStream || m3u8Stream || uniqueStreams[0];
+          setActiveStream(best);
+        } else if (wfStreams.length === 0 && resolverStreams.length === 0) {
+          // No streams at all
+          if (isUpcoming) setPlayerState("countdown");
+          else if (hasTeams) setPlayerState("scoreboard");
+          else setPlayerState("error");
         }
       } catch (err) {
         console.error("Failed to fetch streams:", err);
@@ -213,7 +278,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
       setLoadingStreams(false);
     };
     fetchStreams();
-  }, [props.matchId, props.matchSources, retryCount]);
+  }, [props.matchId, props.matchSources, retryCount, wfStreamsFromProps]);
 
   // When activeStream changes, prepare the player
   useEffect(() => {
@@ -307,6 +372,11 @@ export default function LiveWatchPage(props: LiveWatchProps) {
     const iv = setInterval(fetchScore, 30000);
     return () => clearInterval(iv);
   }, [playerState, props.matchSport, props.matchHomeTeam, props.matchAwayTeam]);
+
+  const switchStream = useCallback((stream: StreamInfo) => {
+    setActiveStream(stream);
+    setShowPlayButton(true);
+  }, []);
 
   // Start M3U8 playback
   const startM3U8Playback = useCallback(() => {
@@ -422,11 +492,6 @@ export default function LiveWatchPage(props: LiveWatchProps) {
       }
     };
   }, []);
-
-  const switchStream = (stream: StreamInfo) => {
-    setActiveStream(stream);
-    setShowPlayButton(true);
-  };
 
   // Handle play button click
   const handlePlayClick = () => {
@@ -614,6 +679,12 @@ export default function LiveWatchPage(props: LiveWatchProps) {
                   LIVE SCOREBOARD
                 </span>
                 <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>{sportIcon} {props.matchSportName || props.matchSport}</span>
+                {wfLeague && (
+                  <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/[0.06] text-white/50">
+                    {wfLeagueLogo && <img src={wfLeagueLogo} alt="" className="w-3.5 h-3.5 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />}
+                    {wfLeague}
+                  </span>
+                )}
               </div>
 
               {/* Main Scoreboard Card */}
@@ -637,7 +708,18 @@ export default function LiveWatchPage(props: LiveWatchProps) {
 
                       {/* Score / VS */}
                       <div className="flex flex-col items-center gap-1 px-4">
-                        {scoreboardData ? (
+                        {hasWfScore ? (
+                          <>
+                            <div className="flex items-center gap-3">
+                              <span className="text-3xl font-black" style={{ color: sportColor }}>{wfHomeScore}</span>
+                              <span className="text-lg text-white/20 font-bold">-</span>
+                              <span className="text-3xl font-black" style={{ color: sportColor }}>{wfAwayScore}</span>
+                            </div>
+                            {wfCurrentMinute && (
+                              <span className="text-[10px] text-amber-400/60 font-bold">{wfCurrentMinute}&apos;</span>
+                            )}
+                          </>
+                        ) : scoreboardData ? (
                           <>
                             <div className="flex items-center gap-3">
                               <span className="text-3xl font-black" style={{ color: sportColor }}>{scoreboardData.homeScore}</span>

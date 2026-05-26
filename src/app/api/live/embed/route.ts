@@ -237,7 +237,7 @@ async function resolveDamiTV(matchId: string): Promise<StreamResult[]> {
   return results;
 }
 
-// ── PROVIDER 4: watchfooty.st → sportsembed.su ──
+// ── PROVIDER 4: watchfooty.st — direct embed URLs from API ──
 async function resolveWatchfooty(matchId: number): Promise<StreamResult[]> {
   const results: StreamResult[] = [];
   try {
@@ -246,19 +246,32 @@ async function resolveWatchfooty(matchId: number): Promise<StreamResult[]> {
     let streamNo = 1;
     for (const s of streams) {
       if (!s.url) continue;
-      try {
-        const embedHtml = await GEThtml(s.url, { Referer: "https://watchfooty.st/" });
-        const m3u8Match = embedHtml.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/);
-        if (m3u8Match) {
-          results.push({
-            id: `wf-${matchId}-${streamNo}`, streamNo, language: s.language || "English", hd: s.quality === "HD",
-            m3u8Url: m3u8Match[0], quality: s.quality === "HD" ? "720p" : "480p",
-            source: s.source || "watchfooty", viewers: 0, provider: "watchfooty",
-            corsEnabled: false, referer: "https://watchfooty.st/", streamType: "m3u8",
-          });
-          streamNo++;
-        }
-      } catch {}
+      // Add the stream URL directly as an embed — WatchFooty embeds work in iframes
+      const label = `${s.language || "English"} ${s.quality || "HD"}`.trim();
+      results.push({
+        id: `wf-embed-${matchId}-${streamNo}`, streamNo, language: s.language || "English",
+        hd: s.quality === "hd" || s.quality === "HD", m3u8Url: "", quality: s.quality === "hd" || s.quality === "HD" ? "720p" : "480p",
+        source: `WatchFooty ${label}`, viewers: 0, provider: "watchfooty",
+        corsEnabled: false, referer: "https://watchfooty.st/", embedUrl: s.url, streamType: "embed",
+      });
+      streamNo++;
+
+      // Also try to extract M3U8 from embed page as a backup
+      if (!s.isRedirect) {
+        try {
+          const embedHtml = await GEThtml(s.url, { Referer: "https://watchfooty.st/" });
+          const m3u8Match = embedHtml.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/);
+          if (m3u8Match) {
+            results.push({
+              id: `wf-m3u8-${matchId}-${streamNo}`, streamNo, language: s.language || "English", hd: s.quality === "hd" || s.quality === "HD",
+              m3u8Url: m3u8Match[0], quality: s.quality === "hd" || s.quality === "HD" ? "720p" : "480p",
+              source: `WatchFooty M3U8`, viewers: 0, provider: "watchfooty",
+              corsEnabled: false, referer: "https://watchfooty.st/", streamType: "m3u8",
+            });
+            streamNo++;
+          }
+        } catch {}
+      }
     }
   } catch {}
   return results;
