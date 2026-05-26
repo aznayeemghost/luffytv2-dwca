@@ -159,11 +159,15 @@ export default function LiveWatchPage(props: LiveWatchProps) {
   const [streams, setStreams] = useState<StreamInfo[]>([]);
   const [activeStream, setActiveStream] = useState<StreamInfo | null>(null);
   const [loadingStreams, setLoadingStreams] = useState(true);
-  const [playerState, setPlayerState] = useState<"loading" | "playing" | "error" | "countdown" | "no-stream" | "ready">("loading");
+  const [playerState, setPlayerState] = useState<"loading" | "playing" | "error" | "countdown" | "no-stream" | "ready" | "scoreboard">("loading");
   const [playerError, setPlayerError] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [showPlayButton, setShowPlayButton] = useState(false); // Embed auto-plays, M3U8 needs click
+
+  // ── Scoreboard live score state ──
+  const [scoreboardData, setScoreboardData] = useState<{ homeScore: string; awayScore: string; period: string; clock: string; statusDetail: string } | null>(null);
+  const [scoreboardLoading, setScoreboardLoading] = useState(false);
 
   const sportIcon = sportIcons[props.matchSport || "other"] || "📺";
   const sportColor = sportColors[props.matchSport || "other"] || "#6b7280";
@@ -222,7 +226,7 @@ export default function LiveWatchPage(props: LiveWatchProps) {
 
     if (!activeStream?.m3u8Url) {
       if (isUpcoming) setPlayerState("countdown");
-      else setPlayerState("no-stream");
+      else setPlayerState("scoreboard"); // Show scoreboard instead of plain "no stream"
       return;
     }
 
@@ -230,6 +234,79 @@ export default function LiveWatchPage(props: LiveWatchProps) {
     setShowPlayButton(true);
     setPlayerState("ready");
   }, [activeStream]);
+
+  // ── Fetch ESPN live score when scoreboard is showing ──
+  useEffect(() => {
+    if (playerState !== "scoreboard") return;
+    if (!props.matchHomeTeam && !props.matchAwayTeam) return;
+
+    const fetchScore = async () => {
+      setScoreboardLoading(true);
+      try {
+        // Map our sport to ESPN sport/league
+        const espnMap: Record<string, { sport: string; league: string }[]> = {
+          basketball: [{ sport: "basketball", league: "nba" }],
+          "american-football": [{ sport: "football", league: "nfl" }],
+          football: [{ sport: "soccer", league: "eng.1" }, { sport: "soccer", league: "usa.1" }, { sport: "soccer", league: "uefa.champions" }],
+          hockey: [{ sport: "hockey", league: "nhl" }],
+          baseball: [{ sport: "baseball", league: "mlb" }],
+        };
+
+        const leagues = espnMap[props.matchSport] || [];
+        let found = false;
+
+        for (const { sport, league } of leagues) {
+          try {
+            const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${sport}/${league}/scoreboard`);
+            if (!res.ok) continue;
+            const data = await res.json();
+
+            for (const event of data.events || []) {
+              const comp = event.competitions?.[0];
+              if (!comp) continue;
+
+              const home = comp.competitors?.find((c: any) => c.homeAway === "home");
+              const away = comp.competitors?.find((c: any) => c.homeAway === "away");
+
+              const homeName = home?.team?.displayName || "";
+              const awayName = away?.team?.displayName || "";
+
+              // Match by team name similarity
+              const homeMatch = homeName && props.matchHomeTeam &&
+                (homeName.toLowerCase().includes(props.matchHomeTeam.toLowerCase()) ||
+                 props.matchHomeTeam.toLowerCase().includes(homeName.toLowerCase()));
+              const awayMatch = awayName && props.matchAwayTeam &&
+                (awayName.toLowerCase().includes(props.matchAwayTeam.toLowerCase()) ||
+                 props.matchAwayTeam.toLowerCase().includes(awayName.toLowerCase()));
+
+              if (homeMatch || awayMatch || (homeMatch && awayMatch)) {
+                const statusDetail = comp.status?.type?.detail || "";
+                const period = comp.status?.period ? `Period ${comp.status.period}` : "";
+                const clock = comp.status?.displayClock || "";
+
+                setScoreboardData({
+                  homeScore: home?.score || "0",
+                  awayScore: away?.score || "0",
+                  period,
+                  clock,
+                  statusDetail,
+                });
+                found = true;
+                break;
+              }
+            }
+            if (found) break;
+          } catch { continue; }
+        }
+      } catch {}
+      setScoreboardLoading(false);
+    };
+
+    fetchScore();
+    // Refresh score every 30 seconds while scoreboard is showing
+    const iv = setInterval(fetchScore, 30000);
+    return () => clearInterval(iv);
+  }, [playerState, props.matchSport, props.matchHomeTeam, props.matchAwayTeam]);
 
   // Start M3U8 playback
   const startM3U8Playback = useCallback(() => {
@@ -296,10 +373,12 @@ export default function LiveWatchPage(props: LiveWatchProps) {
 
             hls2.on(Hls.Events.ERROR, (_e2, data2) => {
               if (data2.fatal) {
-                // M3U8 failed - auto-switch to embed if available
+                // M3U8 failed - auto-switch to embed if available, else show scoreboard
                 const embedStream = streams.find(s => s.streamType === "embed" && s.embedUrl);
                 if (embedStream) {
                   switchStream(embedStream);
+                } else if (hasTeams) {
+                  setPlayerState("scoreboard");
                 } else {
                   setPlayerState("error");
                   setPlayerError("Stream failed to load. Try a different server.");
@@ -308,10 +387,12 @@ export default function LiveWatchPage(props: LiveWatchProps) {
             });
             return;
           }
-          // M3U8 fatal error - auto-switch to embed if available
+          // M3U8 fatal error - auto-switch to embed if available, else show scoreboard
           const embedStream = streams.find(s => s.streamType === "embed" && s.embedUrl);
           if (embedStream) {
             switchStream(embedStream);
+          } else if (hasTeams) {
+            setPlayerState("scoreboard");
           } else {
             setPlayerState("error");
             setPlayerError("Stream failed to load. Try a different server.");
@@ -512,31 +593,151 @@ export default function LiveWatchPage(props: LiveWatchProps) {
           </div>
         )}
 
-        {/* No stream available */}
-        {playerState === "no-stream" && !isUpcoming && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black z-20">
-            <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-white/5">
-              <span className="text-3xl">{sportIcon}</span>
+        {/* ═══════════════════════════════════════════════════
+            SCOREBOARD — Shows when no streams are available
+            Displays team info, live score (from ESPN if available),
+            match status, and refresh/try-embed buttons
+            ═══════════════════════════════════════════════════ */}
+        {playerState === "scoreboard" && !isUpcoming && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-black via-[#0a0a0f] to-black z-20 overflow-auto">
+            {/* Background glow */}
+            <div className="absolute inset-0 opacity-20" style={{ background: `radial-gradient(circle at 50% 40%, ${sportColor}20, transparent 60%)` }} />
+
+            <div className="relative z-10 flex flex-col items-center gap-5 px-6 py-8 w-full max-w-lg">
+              {/* Live indicator */}
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-500/15 text-red-400 text-[11px] font-bold">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+                  </span>
+                  LIVE SCOREBOARD
+                </span>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: `${sportColor}15`, color: sportColor }}>{sportIcon} {props.matchSportName || props.matchSport}</span>
+              </div>
+
+              {/* Main Scoreboard Card */}
+              <div className="w-full rounded-2xl overflow-hidden border border-white/[0.06]" style={{ background: `linear-gradient(135deg, ${sportColor}08, rgba(255,255,255,0.02))` }}>
+                {/* Top accent bar */}
+                <div className="h-1" style={{ background: `linear-gradient(90deg, ${sportColor}, ${sportColor}50, transparent)` }} />
+
+                <div className="p-6">
+                  {/* Team names */}
+                  {hasTeams ? (
+                    <div className="flex items-center justify-between gap-4">
+                      {/* Home Team */}
+                      <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
+                        {props.matchHomeBadge ? (
+                          <img src={props.matchHomeBadge} alt={props.matchHomeTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                        ) : (
+                          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}15`, color: `${sportColor}90` }}>{props.matchHomeTeam?.charAt(0) || "H"}</div>
+                        )}
+                        <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{props.matchHomeTeam || "Home"}</span>
+                      </div>
+
+                      {/* Score / VS */}
+                      <div className="flex flex-col items-center gap-1 px-4">
+                        {scoreboardData ? (
+                          <>
+                            <div className="flex items-center gap-3">
+                              <span className="text-3xl font-black" style={{ color: sportColor }}>{scoreboardData.homeScore}</span>
+                              <span className="text-lg text-white/20 font-bold">-</span>
+                              <span className="text-3xl font-black" style={{ color: sportColor }}>{scoreboardData.awayScore}</span>
+                            </div>
+                            {scoreboardData.period && (
+                              <span className="text-[10px] text-white/30 font-bold uppercase tracking-wider">{scoreboardData.period}</span>
+                            )}
+                            {scoreboardData.clock && (
+                              <span className="text-[10px] text-amber-400/60 font-bold">{scoreboardData.clock}</span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-2xl font-black text-white/15 tracking-widest">VS</span>
+                        )}
+                      </div>
+
+                      {/* Away Team */}
+                      <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
+                        {props.matchAwayBadge ? (
+                          <img src={props.matchAwayBadge} alt={props.matchAwayTeam} className="w-16 h-16 object-contain rounded-xl bg-white/5 p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                        ) : (
+                          <div className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold" style={{ background: `${sportColor}15`, color: `${sportColor}90` }}>{props.matchAwayTeam?.charAt(0) || "A"}</div>
+                        )}
+                        <span className="text-sm text-white/80 font-semibold text-center truncate w-full">{props.matchAwayTeam || "Away"}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    /* No team data — show title */
+                    <div className="text-center">
+                      <h3 className="text-lg font-bold text-white/80 mb-2">{props.matchTitle}</h3>
+                      {scoreboardData && (
+                        <div className="flex items-center justify-center gap-3">
+                          <span className="text-2xl font-black" style={{ color: sportColor }}>{scoreboardData.homeScore}</span>
+                          <span className="text-lg text-white/20 font-bold">-</span>
+                          <span className="text-2xl font-black" style={{ color: sportColor }}>{scoreboardData.awayScore}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Match status line */}
+                  <div className="mt-4 pt-3 border-t border-white/[0.04] flex items-center justify-between">
+                    <span className="text-[10px] text-white/25">
+                      {matchTime || props.matchSportName || "Live Match"}
+                    </span>
+                    {scoreboardData?.statusDetail ? (
+                      <span className="text-[10px] text-emerald-400/60 font-bold">{scoreboardData.statusDetail}</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-red-400 font-bold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> LIVE
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Score loading indicator */}
+              {scoreboardLoading && (
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full border border-white/20 border-t-white/60 animate-spin" />
+                  <span className="text-[10px] text-white/25">Fetching live score...</span>
+                </div>
+              )}
+
+              {/* No streams message */}
+              <div className="text-center px-4 py-3 rounded-xl bg-white/[0.02] border border-white/[0.04] w-full">
+                <p className="text-[11px] text-white/30 mb-1">No streams available for this match</p>
+                <p className="text-[9px] text-white/15">The stream will appear when a source goes live</p>
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex gap-2 flex-wrap justify-center w-full">
+                {streams.filter(s => s.streamType === "embed").length > 0 && (
+                  <button
+                    onClick={() => {
+                      const embedStream = streams.find(s => s.streamType === "embed" && s.embedUrl);
+                      if (embedStream) switchStream(embedStream);
+                    }}
+                    className="px-5 py-2.5 rounded-xl bg-purple-500/15 text-purple-400 text-[11px] font-bold hover:bg-purple-500/25 border border-purple-500/20 transition-all flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><rect x="2" y="4" width="20" height="14" rx="2" /></svg>
+                    Try Embed Player
+                  </button>
+                )}
+                {newTabUrl && (
+                  <a href={newTabUrl} target="_blank" rel="noopener noreferrer"
+                    className="px-5 py-2.5 rounded-xl bg-emerald-500/15 text-emerald-400 text-[11px] font-bold hover:bg-emerald-500/25 border border-emerald-500/20 transition-all flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                    Watch in New Tab
+                  </a>
+                )}
+                <button onClick={() => setRetryCount(c => c + 1)} className="px-5 py-2.5 rounded-xl bg-white/[0.06] text-white/40 text-[11px] font-bold hover:bg-white/[0.08] transition-all flex items-center gap-2">
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16" /></svg>
+                  Refresh
+                </button>
+              </div>
             </div>
-            <p className="text-sm text-white/40">No M3U8 streams available</p>
-            {streams.filter(s => s.streamType === "embed").length > 0 && (
-              <button
-                onClick={() => {
-                  const embedStream = streams.find(s => s.streamType === "embed" && s.embedUrl);
-                  if (embedStream) switchStream(embedStream);
-                }}
-                className="px-4 py-2 rounded-xl bg-purple-500/10 text-purple-400/70 text-[11px] font-bold hover:text-purple-400 border border-purple-500/10 transition-all"
-              >
-                Try Embed Player
-              </button>
-            )}
-            {newTabUrl && (
-              <a href={newTabUrl} target="_blank" rel="noopener noreferrer"
-                className="px-4 py-2 rounded-xl bg-emerald-500/10 text-emerald-400/70 text-[11px] font-bold hover:text-emerald-400 border border-emerald-500/10 transition-all">
-                Try External Player
-              </a>
-            )}
-            <button onClick={() => setRetryCount(c => c + 1)} className="px-4 py-2 rounded-xl bg-white/[0.06] text-white/40 text-[11px] font-bold hover:bg-white/[0.08] transition-all">Refresh Streams</button>
           </div>
         )}
 
