@@ -513,7 +513,8 @@ export default function LivePage() {
 
       const matchList: LiveMatch[] = (data.matches || []).map((m: any) => ({
         ...m,
-        isLive: m.isLive || m.status === "in" || m.status === "live",
+        // Trust the server's isLive determination (it already applies proper status checks + time-based sanity)
+        // Don't override with status strings that may be stale
       }));
 
       matchList.sort((a, b) => {

@@ -146,7 +146,7 @@ async function fetchDamiTVStreams(): Promise<LiveMatch[]> {
           awayTeam,
           homeBadge,
           awayBadge,
-          isLive: s.status === "live",
+          isLive: s.status === "live" || s.is_live === true,
           apiSource: "damitv",
           sources: [],
           damitvId: s.uri_name || s.id || "",
@@ -185,7 +185,7 @@ async function fetchDamiTVChannels(): Promise<LiveMatch[]> {
           awayTeam: s.status === "live" ? awayTeam : (s.league || s.category_name || ""),
           homeBadge: s.teams?.home?.badge || s.poster || "",
           awayBadge: s.teams?.away?.badge || "",
-          isLive: s.status === "live" || s.always_live === 1,
+          isLive: s.status === "live" || s.is_live === true || s.always_live === 1,
           apiSource: "damitv",
           sources: [],
           damitvId: s.uri_name || s.id || "",
@@ -244,7 +244,7 @@ async function fetchWatchfootyLive(): Promise<LiveMatch[]> {
         awayTeam: m.teams?.away?.name || "",
         homeBadge: m.teams?.home?.logoUrl ? (m.teams.home.logoUrl.startsWith("http") ? m.teams.home.logoUrl : `${WF_BASE}${m.teams.home.logoUrl}`) : (m.teams?.home?.logo ? (m.teams.home.logo.startsWith("http") ? m.teams.home.logo : `${WF_BASE}${m.teams.home.logo}`) : ""),
         awayBadge: m.teams?.away?.logoUrl ? (m.teams.away.logoUrl.startsWith("http") ? m.teams.away.logoUrl : `${WF_BASE}${m.teams.away.logoUrl}`) : (m.teams?.away?.logo ? (m.teams.away.logo.startsWith("http") ? m.teams.away.logo : `${WF_BASE}${m.teams.away.logo}`) : ""),
-        isLive: m.status === "in" || m.status === "live" || true,
+        isLive: m.status === "in" || m.status === "live",
         apiSource: "watchfooty",
         sources: [],
         watchfootyId: m.matchId,
@@ -334,7 +334,7 @@ async function fetchWatchfootyPopularLive(): Promise<LiveMatch[]> {
         awayTeam: m.teams?.away?.name || "",
         homeBadge: m.teams?.home?.logoUrl ? (m.teams.home.logoUrl.startsWith("http") ? m.teams.home.logoUrl : `${WF_BASE}${m.teams.home.logoUrl}`) : (m.teams?.home?.logo ? (m.teams.home.logo.startsWith("http") ? m.teams.home.logo : `${WF_BASE}${m.teams.home.logo}`) : ""),
         awayBadge: m.teams?.away?.logoUrl ? (m.teams.away.logoUrl.startsWith("http") ? m.teams.away.logoUrl : `${WF_BASE}${m.teams.away.logoUrl}`) : (m.teams?.away?.logo ? (m.teams.away.logo.startsWith("http") ? m.teams.away.logo : `${WF_BASE}${m.teams.away.logo}`) : ""),
-        isLive: true,
+        isLive: m.status === "in" || m.status === "live",
         apiSource: "watchfooty",
         sources: [],
         watchfootyId: m.matchId,
@@ -460,7 +460,7 @@ async function fetchStreamedPK(endpoint: string): Promise<LiveMatch[]> {
         awayTeam: m.teams?.away?.name || m.away_team || extractTeam(m.title || "", 1),
         homeBadge: m.teams?.home?.badge ? (m.teams.home.badge.startsWith("http") ? m.teams.home.badge : `https://streamed.pk/api/images/badge/${m.teams.home.badge}.webp`) : (m.home_logo || ""),
         awayBadge: m.teams?.away?.badge ? (m.teams.away.badge.startsWith("http") ? m.teams.away.badge : `https://streamed.pk/api/images/badge/${m.teams.away.badge}.webp`) : (m.away_logo || ""),
-        isLive: isLiveEndpoint || m.live || m.isLive || m.status === "live" || false,
+        isLive: m.live || m.isLive || m.status === "live" || m.status === "in" || false,
         apiSource: "streamed",
         sources,
       };
@@ -539,7 +539,7 @@ async function fetchSportsembedSu(): Promise<LiveMatch[]> {
         awayTeam: ev.away_team || ev.teams?.away?.name || extractTeam(ev.title || "", 1),
         homeBadge: ev.home_logo || ev.teams?.home?.logo || "",
         awayBadge: ev.away_logo || ev.teams?.away?.logo || "",
-        isLive: true,
+        isLive: ev.live || ev.is_live || ev.status === "live" || ev.status === "in" || false,
         apiSource: "sportsembed",
         sources: [],
         sportsrcCategory: ev.category || ev.sport || "",
@@ -623,7 +623,9 @@ function pickMissing(base: LiveMatch, fill: LiveMatch): Partial<LiveMatch> {
   if (!base.streamKey && fill.streamKey) result.streamKey = fill.streamKey;
   if (!base.streamCategory && fill.streamCategory) result.streamCategory = fill.streamCategory;
   if (fill.popular) result.popular = true;
-  if (fill.isLive) result.isLive = true;
+  // Only mark as live if confirmed by a source; don't override a correct non-live status
+  // from a more authoritative/recent source
+  if (fill.isLive && !base.isLive) result.isLive = true;
   if (base.sources.length === 0 && fill.sources.length > 0) result.sources = fill.sources;
   // ALSO merge additional sources from fill into base (don't lose StreamedPK sources!)
   else if (fill.sources.length > 0) {
@@ -736,6 +738,31 @@ export async function GET(req: Request) {
 
     let matches = mergeMatches(allLists);
 
+    // ── Time-based sanity check: unmark stale "live" matches ──
+    // If a match was marked isLive but its start time was more than 5 hours ago
+    // AND no authoritative source (ESPN with status "in", WatchFooty with status "in")
+    // explicitly confirms it's still live, mark it as not live.
+    // Most sports matches last 2-3 hours max; 5h gives extra buffer for delays/OT.
+    const STALE_LIVE_THRESHOLD = 5 * 60 * 60 * 1000; // 5 hours
+    const now = Date.now();
+    for (const m of matches) {
+      if (!m.isLive) continue;
+      // Always-live TV channels (no specific match time) stay live
+      if (!m.date) continue;
+      // If the match started less than 5 hours ago, keep it as live
+      if (m.date > now - STALE_LIVE_THRESHOLD) continue;
+      // Match started over 5 hours ago — only keep live if an authoritative source confirms it
+      // ESPN explicitly checks competition status type === "in"
+      // WatchFooty explicitly checks m.status === "in" or "live"
+      const confirmedByEspn = m.apiSource === "espn";
+      const confirmedByWatchfooty = m.apiSource === "watchfooty" && m.currentMinute;
+      // DamiTV always_live channels are 24/7 — keep them
+      const isAlwaysLiveChannel = m.apiSource === "damitv" && !m.homeTeam && !m.awayTeam;
+      if (!confirmedByEspn && !confirmedByWatchfooty && !isAlwaysLiveChannel) {
+        m.isLive = false;
+      }
+    }
+
     // Filter by sport
     if (sport) {
       matches = matches.filter(m => m.sport === sport);
@@ -743,7 +770,6 @@ export async function GET(req: Request) {
 
     // Filter for live matches
     if (filter === "live") {
-      const now = Date.now();
       matches = matches.filter(m => {
         if (m.isLive) return true;
         if (!m.date) return false;
