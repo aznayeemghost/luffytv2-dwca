@@ -251,9 +251,9 @@ async function fetchWatchfootyLive(): Promise<LiveMatch[]> {
         watchfootyStreams: streams,
         league: m.league || "",
         leagueLogo: m.leagueLogo ? (m.leagueLogo.startsWith("http") ? m.leagueLogo : `${WF_BASE}${m.leagueLogo}`) : "",
-        homeScore: m.scores?.home ?? undefined,
-        awayScore: m.scores?.away ?? undefined,
-        currentMinute: m.currentMinute || undefined,
+        homeScore: toPrimitive(m.scores?.home) ?? undefined,
+        awayScore: toPrimitive(m.scores?.away) ?? undefined,
+        currentMinute: toPrimitive(m.currentMinute) || undefined,
       };
     });
   } catch { return []; }
@@ -296,9 +296,9 @@ async function fetchWatchfootyAll(): Promise<LiveMatch[]> {
         watchfootyStreams: streams,
         league: m.league || "",
         leagueLogo: m.leagueLogo ? (m.leagueLogo.startsWith("http") ? m.leagueLogo : `${WF_BASE}${m.leagueLogo}`) : "",
-        homeScore: m.scores?.home ?? undefined,
-        awayScore: m.scores?.away ?? undefined,
-        currentMinute: m.currentMinute || undefined,
+        homeScore: toPrimitive(m.scores?.home) ?? undefined,
+        awayScore: toPrimitive(m.scores?.away) ?? undefined,
+        currentMinute: toPrimitive(m.currentMinute) || undefined,
       };
     });
   } catch { return []; }
@@ -341,9 +341,9 @@ async function fetchWatchfootyPopularLive(): Promise<LiveMatch[]> {
         watchfootyStreams: streams,
         league: m.league || "",
         leagueLogo: m.leagueLogo ? (m.leagueLogo.startsWith("http") ? m.leagueLogo : `${WF_BASE}${m.leagueLogo}`) : "",
-        homeScore: m.scores?.home ?? undefined,
-        awayScore: m.scores?.away ?? undefined,
-        currentMinute: m.currentMinute || undefined,
+        homeScore: toPrimitive(m.scores?.home) ?? undefined,
+        awayScore: toPrimitive(m.scores?.away) ?? undefined,
+        currentMinute: toPrimitive(m.currentMinute) || undefined,
       };
     });
   } catch { return []; }
@@ -428,9 +428,9 @@ async function fetchWatchfootyPopular(): Promise<LiveMatch[]> {
         watchfootyStreams: streams,
         league: m.league || "",
         leagueLogo: m.leagueLogo ? (m.leagueLogo.startsWith("http") ? m.leagueLogo : `${WF_BASE}${m.leagueLogo}`) : "",
-        homeScore: m.scores?.home ?? undefined,
-        awayScore: m.scores?.away ?? undefined,
-        currentMinute: m.currentMinute || undefined,
+        homeScore: toPrimitive(m.scores?.home) ?? undefined,
+        awayScore: toPrimitive(m.scores?.away) ?? undefined,
+        currentMinute: toPrimitive(m.currentMinute) || undefined,
       };
     });
   } catch { return []; }
@@ -651,6 +651,19 @@ function pickMissing(base: LiveMatch, fill: LiveMatch): Partial<LiveMatch> {
 }
 
 // ── Helpers ──
+// Safely extract a primitive from API values that might be objects like {value, displayValue}
+function toPrimitive(v: any): any {
+  if (v === null || v === undefined) return undefined;
+  if (typeof v === "object") {
+    // Handle {value, displayValue} pattern from some APIs
+    if ("value" in v) return v.value;
+    if ("displayValue" in v) return v.displayValue;
+    // Handle other object patterns
+    if (typeof v.toString === "function" && v.toString() !== "[object Object]") return v.toString();
+    return undefined;
+  }
+  return v;
+}
 function capitalize(s: string): string { return s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, " ") : ""; }
 function mapCategoryToSport(cat: string): string {
   const m: Record<string, string> = {

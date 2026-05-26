@@ -268,10 +268,10 @@ function MatchCard({ match, onWatch, variant }: { match: LiveMatch; onWatch: (m:
           {hasScore && (
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 mt-6">
               <span className="text-sm font-black text-white bg-black/40 px-2 py-0.5 rounded">
-                {match.homeScore} - {match.awayScore}
+                {String(match.homeScore)} - {String(match.awayScore)}
               </span>
               {match.currentMinute && (
-                <span className="block text-center text-[8px] text-amber-400 font-bold mt-0.5">{match.currentMinute}&apos;</span>
+                <span className="block text-center text-[8px] text-amber-400 font-bold mt-0.5">{String(match.currentMinute)}&apos;</span>
               )}
             </div>
           )}
@@ -379,10 +379,10 @@ function MatchCard({ match, onWatch, variant }: { match: LiveMatch; onWatch: (m:
         {hasScore && (
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 mt-10 flex flex-col items-center">
             <span className="text-xl font-black text-white bg-black/50 px-3 py-1 rounded-lg">
-              {match.homeScore} - {match.awayScore}
+              {String(match.homeScore)} - {String(match.awayScore)}
             </span>
             {match.currentMinute && (
-              <span className="text-[10px] text-amber-400 font-bold mt-1">{match.currentMinute}&apos;</span>
+              <span className="text-[10px] text-amber-400 font-bold mt-1">{String(match.currentMinute)}&apos;</span>
             )}
           </div>
         )}

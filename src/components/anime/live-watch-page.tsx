@@ -257,17 +257,27 @@ export default function LiveWatchPage(props: LiveWatchProps) {
   const _leagueLogo = props.matchLeagueLogo || fetchedMatch?.leagueLogo || "";
 
   // WatchFooty score data from props (with fetched fallback)
-  const wfHomeScore = props.matchHomeScore ?? fetchedMatch?.homeScore;
-  const wfAwayScore = props.matchAwayScore ?? fetchedMatch?.awayScore;
-  const wfCurrentMinute = props.matchCurrentMinute || fetchedMatch?.currentMinute;
+  // Safely handle API values that might be objects like {value, displayValue}
+  const toVal = (v: any): any => {
+    if (v === null || v === undefined) return undefined;
+    if (typeof v === "object" && v !== null) {
+      if ("value" in v) return v.value;
+      if ("displayValue" in v) return v.displayValue;
+      return undefined;
+    }
+    return v;
+  };
+  const wfHomeScore = toVal(props.matchHomeScore ?? fetchedMatch?.homeScore);
+  const wfAwayScore = toVal(props.matchAwayScore ?? fetchedMatch?.awayScore);
+  const wfCurrentMinute = toVal(props.matchCurrentMinute || fetchedMatch?.currentMinute);
   const wfLeague = _league;
   const wfLeagueLogo = _leagueLogo;
   const hasWfScore = wfHomeScore !== undefined && wfAwayScore !== undefined;
 
   // Computed best available scores (WatchFooty props > matchStats > ESPN scoreboardData)
-  const bestHomeScore = hasWfScore ? String(wfHomeScore) : (matchStats?.details?.scores?.home ?? scoreboardData?.homeScore ?? null);
-  const bestAwayScore = hasWfScore ? String(wfAwayScore) : (matchStats?.details?.scores?.away ?? scoreboardData?.awayScore ?? null);
-  const bestMinute = wfCurrentMinute || matchStats?.details?.currentMinute || scoreboardData?.clock || null;
+  const bestHomeScore = hasWfScore ? String(wfHomeScore) : (matchStats?.details?.scores?.home ? String(matchStats.details.scores.home) : scoreboardData?.homeScore ?? null);
+  const bestAwayScore = hasWfScore ? String(wfAwayScore) : (matchStats?.details?.scores?.away ? String(matchStats.details.scores.away) : scoreboardData?.awayScore ?? null);
+  const bestMinute = wfCurrentMinute ? String(wfCurrentMinute) : (matchStats?.details?.currentMinute ? String(matchStats.details.currentMinute) : scoreboardData?.clock || null);
   const hasAnyScore = bestHomeScore !== null && bestAwayScore !== null;
 
   // Parse WatchFooty streams from props
